@@ -48,5 +48,5 @@ Requirements are pinned to exact versions in `manifest.json`, and repeated with 
 ## Releases
 
 1. Bump `version` in `custom_components/flight_prices/manifest.json`.
-2. Publish a GitHub release tagged `v` plus that version, for example `v0.1.1`.
-3. The **Release** workflow checks that the tag matches the manifest and attaches `flight_prices.zip`, which is what HACS installs.
+2. Push a tag `v` plus that version, for example `v0.1.1`.
+3. The **Release** workflow checks that the tag matches the manifest and creates a draft release with `flight_prices.zip`, which is what the Marketplace (HACS before Home Assistant 2026.11) installs. Write the notes and publish the draft by hand: releases are immutable once published.

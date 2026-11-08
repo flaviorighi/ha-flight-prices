@@ -22,7 +22,7 @@ body:
     id: version
     attributes:
       label: Version of the integration
-      description: In Settings → Devices & services → Flight Prices, or in HACS.
+      description: In Settings → Devices & services → Flight Prices, or in Settings → Marketplace.
       placeholder: "0.1.0"
     validations:
       required: true
@@ -39,7 +39,8 @@ body:
     attributes:
       label: Installed with
       options:
-        - HACS
+        - Marketplace
+        - HACS (Home Assistant 2026.10)
         - By hand
     validations:
       required: true

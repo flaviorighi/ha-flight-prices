@@ -1,6 +1,7 @@
 name: Release
 
-# HACS installs the zip attached to each release (zip_release in hacs.json), so GitHub counts
+# The Marketplace (HACS before Home Assistant 2026.11) installs the zip attached to each release
+# (zip_release in hacs.json), so GitHub counts
 # every download. The zip holds the files of custom_components/flight_prices at its root.
 #
 # Releases are immutable: once published, neither their tag nor their files can change. So the

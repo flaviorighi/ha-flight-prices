@@ -8,4 +8,4 @@ This is a project maintained in spare time, so an answer can take a few days. On
 
 ## Supported versions
 
-Only the latest release gets fixes. Update through HACS, or from the [releases](https://github.com/flaviorighi/ha-flight-prices/releases).
+Only the latest release gets fixes. Update from Settings → Marketplace (HACS before Home Assistant 2026.11), or from the [releases](https://github.com/flaviorighi/ha-flight-prices/releases).

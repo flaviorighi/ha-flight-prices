@@ -119,7 +119,7 @@ The Google search runs in the background. Its round stops at the first block (co
 
 ## Installation
 
-With HACS: add this repository as a custom repository (category Integration), install **Flight Prices** and restart Home Assistant. By hand: copy `custom_components/flight_prices` into your `config/custom_components` and restart.
+From the **Marketplace**, which replaced HACS in Home Assistant 2026.11: **Settings → Marketplace → Add from link**, paste `https://github.com/flaviorighi/ha-flight-prices`, install **Flight Prices** and restart Home Assistant. Updates then appear in **Settings** like those of Home Assistant. With HACS, on Home Assistant 2026.10: add this repository as a custom repository (category Integration), install **Flight Prices** and restart. By hand: copy `custom_components/flight_prices` into your `config/custom_components` and restart.
 
 Then add the integration in **Settings → Devices & services**. The options can be changed later from the integration's **Configure** button. The **[configuration guide](https://github.com/flaviorighi/ha-flight-prices/blob/main/docs/configuration.md)** explains each option, with images and ready-made setups.
 
