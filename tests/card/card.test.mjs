@@ -190,6 +190,17 @@ describe("texts", () => {
     assert.equal(t({ locale: { language: "it" } }, "show_many", { count: 4 }), "Mostra le altre 4 destinazioni");
   });
 
+  test("Polish: the language follows Home Assistant, and counts need no declension", () => {
+    assert.equal(language({ locale: { language: "pl" } }), "pl");
+    assert.equal(language({ locale: { language: "pl-PL" } }), "pl");
+    const hass = { locale: { language: "pl" } };
+    for (const count of [2, 5, 22]) {
+      assert.equal(t(hass, "show_many", { count }), `Pokaż pozostałe cele (${count})`);
+      assert.equal(t(hass, "count_many", { count }), `Cele: ${count}`);
+    }
+    assert.equal(dateRange(hass, new Date(2026, 10, 6), new Date(2026, 10, 8)), "6–8 lis");
+  });
+
   test("text from the sensors is escaped", () => {
     assert.equal(escape(`<b>"Rome" & 'Paris'</b>`), "&lt;b&gt;&quot;Rome&quot; &amp; &#39;Paris&#39;&lt;/b&gt;");
   });

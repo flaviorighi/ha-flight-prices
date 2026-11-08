@@ -1,0 +1,176 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nowe wyszukiwanie lotów",
+        "description": "Loty w obie strony co tydzień: wylot jednego dnia, powrót innego, w wybranych godzinach. Ceny dotyczą jednej osoby dorosłej. [Przewodnik konfiguracji]({guide_url}) wyjaśnia każdą opcję, z przykładami.",
+        "data": {
+          "name": "Nazwa",
+          "origins": "Lotniska wylotu",
+          "destinations": "Cele podróży",
+          "exclude_countries": "Pomiń kraje",
+          "sources": "Źródła",
+          "google_origins": "Lotniska wylotu dla Google Flights",
+          "google_destinations": "Cele dla Google Flights",
+          "weeks": "Liczba tygodni",
+          "outbound_day": "Dzień wylotu",
+          "outbound_from": "Wylot od godziny",
+          "outbound_to": "Wylot do godziny",
+          "return_day": "Dzień powrotu",
+          "return_from": "Powrót od godziny",
+          "return_to": "Powrót do godziny",
+          "direct_only": "Tylko loty bezpośrednie"
+        },
+        "data_description": {
+          "name": "Na przykład Weekend z Wrocławia.",
+          "origins": "Kody IATA, na przykład WRO i KTW. Każda podróż wraca na lotnisko, z którego wyleciała.",
+          "destinations": "Kody IATA lotnisk lub miast (LON to wszystkie lotniska Londynu). Puste pole: szukaj gdziekolwiek, tylko Ryanair.",
+          "exclude_countries": "Dwuliterowe kody ISO, na przykład PL, aby pominąć loty krajowe.",
+          "sources": "Ryanair znajduje najtańszą cenę do każdego celu kilkoma zapytaniami. Google Flights obejmuje wszystkie linie, ale tylko dla listy celów i przy wielu zapytaniach rozłożonych na około godzinę. Google Flights jest odczytywane bez API: zbyt wiele wyszukiwań sprawi, że Google wyświetli captchę całemu Twojemu domowemu łączu, dlatego liczba zapytań jest ograniczona do {limit} dziennie.",
+          "google_origins": "Tylko z tych lotnisk wylotu szuka Google Flights, na przykład z tego, którego Ryanair nie obsługuje. Puste pole: ze wszystkich.",
+          "google_destinations": "Szukane tylko w Google Flights, dzięki czemu Ryanair może dalej szukać gdziekolwiek. Puste pole: cele podane wyżej. Trzymaj listę krótką: każdy cel to do 2 zapytań na tydzień i lotnisko, a Google Flights jest ograniczone do {limit} zapytań dziennie.",
+          "weeks": "Ile tygodni naprzód, licząc od najbliższego.",
+          "outbound_to": "24 oznacza północ.",
+          "return_to": "24 oznacza północ.",
+          "direct_only": "Tylko Google Flights: Ryanair zawsze lata bezpośrednio."
+        }
+      },
+      "summary": {
+        "title": "Zapytania do Google Flights",
+        "description": "To wyszukiwanie wykonuje do **{google_round} zapytań** do Google Flights w jednej rundzie, trwającej około {google_minutes} min, co {google_hours} godz.: do **{google_day} dziennie**, przy limicie {limit}. To maksimum: lot powrotny nie jest szukany, gdy nie znaleziono wylotu.\n\nRyanair, jeśli wybrany, wykonuje jedno zapytanie na lotnisko i tydzień.",
+        "menu_options": {
+          "save": "Zapisz",
+          "change": "Zmień wyszukiwanie"
+        }
+      },
+      "summary_high": {
+        "title": "Zapytania do Google Flights",
+        "description": "To wyszukiwanie wykonuje do **{google_round} zapytań** do Google Flights w jednej rundzie, trwającej około {google_minutes} min, co {google_hours} godz.: do **{google_day} dziennie**, przy limicie {limit}. To maksimum: lot powrotny nie jest szukany, gdy nie znaleziono wylotu.\n\nRyanair, jeśli wybrany, wykonuje jedno zapytanie na lotnisko i tydzień.\n\n⚠️ **Blisko limitu.** Zbyt wiele automatycznych wyszukiwań sprawi, że Google wyświetli captchę całemu Twojemu domowemu łączu. Jeśli nie potrzebujesz wszystkich, użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału.",
+        "menu_options": {
+          "save": "Zapisz",
+          "change": "Zmień wyszukiwanie"
+        }
+      }
+    },
+    "error": {
+      "no_origin": "Wpisz co najmniej jedno lotnisko wylotu.",
+      "invalid_code": "Użyj trzyliterowych kodów IATA, na przykład WRO.",
+      "no_source": "Wybierz co najmniej jedno źródło.",
+      "google_needs_destinations": "Google Flights wymaga celów: wpisz własne lub cele powyżej.",
+      "invalid_hours": "Koniec musi być po początku.",
+      "invalid_country": "Użyj dwuliterowych kodów krajów ISO, na przykład PL.",
+      "google_too_many": "Google Flights wykonałoby do {count} zapytań dziennie, więcej niż {limit}, które chronią Twoje domowe łącze przed blokadą: użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału."
+    },
+    "abort": {
+      "already_configured": "To wyszukiwanie już istnieje."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Zmień wyszukiwanie",
+        "description": "Zmiany działają od razu: źródło szuka ponownie tylko wtedy, gdy zmieniło się to, czego szuka (także gdy doszło więcej tygodni). [Przewodnik konfiguracji]({guide_url}) wyjaśnia każdą opcję. To wyszukiwanie wykonuje teraz do {google_day} zapytań dziennie do Google Flights, przy limicie {limit}.",
+        "data": {
+          "origins": "Lotniska wylotu",
+          "destinations": "Cele podróży",
+          "exclude_countries": "Pomiń kraje",
+          "sources": "Źródła",
+          "google_origins": "Lotniska wylotu dla Google Flights",
+          "google_destinations": "Cele dla Google Flights",
+          "weeks": "Liczba tygodni",
+          "outbound_day": "Dzień wylotu",
+          "outbound_from": "Wylot od godziny",
+          "outbound_to": "Wylot do godziny",
+          "return_day": "Dzień powrotu",
+          "return_from": "Powrót od godziny",
+          "return_to": "Powrót do godziny",
+          "direct_only": "Tylko loty bezpośrednie",
+          "ryanair_interval": "Wyszukiwanie Ryanair co",
+          "google_interval": "Wyszukiwanie Google Flights co"
+        },
+        "data_description": {
+          "origins": "Kody IATA, na przykład WRO i KTW. Każda podróż wraca na lotnisko, z którego wyleciała.",
+          "destinations": "Kody IATA lotnisk lub miast (LON to wszystkie lotniska Londynu). Puste pole: szukaj gdziekolwiek, tylko Ryanair.",
+          "exclude_countries": "Dwuliterowe kody ISO, na przykład PL, aby pominąć loty krajowe.",
+          "sources": "Ryanair znajduje najtańszą cenę do każdego celu kilkoma zapytaniami. Google Flights obejmuje wszystkie linie, ale tylko dla listy celów i przy wielu zapytaniach rozłożonych na około godzinę. Google Flights jest odczytywane bez API: zbyt wiele wyszukiwań sprawi, że Google wyświetli captchę całemu Twojemu domowemu łączu, dlatego liczba zapytań jest ograniczona do {limit} dziennie.",
+          "google_origins": "Tylko z tych lotnisk wylotu szuka Google Flights, na przykład z tego, którego Ryanair nie obsługuje. Puste pole: ze wszystkich.",
+          "google_destinations": "Szukane tylko w Google Flights, dzięki czemu Ryanair może dalej szukać gdziekolwiek. Puste pole: cele podane wyżej. Trzymaj listę krótką: każdy cel to do 2 zapytań na tydzień i lotnisko, a Google Flights jest ograniczone do {limit} zapytań dziennie.",
+          "weeks": "Ile tygodni naprzód, licząc od najbliższego.",
+          "outbound_to": "24 oznacza północ.",
+          "return_to": "24 oznacza północ.",
+          "direct_only": "Tylko Google Flights: Ryanair zawsze lata bezpośrednio.",
+          "ryanair_interval": "Liczba godzin między dwoma wyszukiwaniami.",
+          "google_interval": "Liczba godzin między dwoma wyszukiwaniami, co najmniej 12; zalecane 24. Jedno wyszukiwanie obejmuje każdy tydzień, cel i lotnisko, wylot i powrót. Częstsze wyszukiwanie daje niewiele, bo ceny na kilka tygodni naprzód zmieniają się powoli, a grozi blokadą Google dla całego Twojego domowego łącza."
+        }
+      },
+      "summary": {
+        "title": "Zapytania do Google Flights",
+        "description": "To wyszukiwanie wykonuje do **{google_round} zapytań** do Google Flights w jednej rundzie, trwającej około {google_minutes} min, co {google_hours} godz.: do **{google_day} dziennie**, przy limicie {limit}. To maksimum: lot powrotny nie jest szukany, gdy nie znaleziono wylotu.\n\nRyanair, jeśli wybrany, wykonuje jedno zapytanie na lotnisko i tydzień.",
+        "menu_options": {
+          "save": "Zapisz",
+          "change": "Zmień wyszukiwanie"
+        }
+      },
+      "summary_high": {
+        "title": "Zapytania do Google Flights",
+        "description": "To wyszukiwanie wykonuje do **{google_round} zapytań** do Google Flights w jednej rundzie, trwającej około {google_minutes} min, co {google_hours} godz.: do **{google_day} dziennie**, przy limicie {limit}. To maksimum: lot powrotny nie jest szukany, gdy nie znaleziono wylotu.\n\nRyanair, jeśli wybrany, wykonuje jedno zapytanie na lotnisko i tydzień.\n\n⚠️ **Blisko limitu.** Zbyt wiele automatycznych wyszukiwań sprawi, że Google wyświetli captchę całemu Twojemu domowemu łączu. Jeśli nie potrzebujesz wszystkich, użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału.",
+        "menu_options": {
+          "save": "Zapisz",
+          "change": "Zmień wyszukiwanie"
+        }
+      }
+    },
+    "error": {
+      "no_origin": "Wpisz co najmniej jedno lotnisko wylotu.",
+      "invalid_code": "Użyj trzyliterowych kodów IATA, na przykład WRO.",
+      "no_source": "Wybierz co najmniej jedno źródło.",
+      "google_needs_destinations": "Google Flights wymaga celów: wpisz własne lub cele powyżej.",
+      "invalid_hours": "Koniec musi być po początku.",
+      "invalid_country": "Użyj dwuliterowych kodów krajów ISO, na przykład PL.",
+      "google_too_many": "Google Flights wykonałoby do {count} zapytań dziennie, więcej niż {limit}, które chronią Twoje domowe łącze przed blokadą: użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału."
+    }
+  },
+  "selector": {
+    "sources": {
+      "options": {
+        "ryanair": "Ryanair",
+        "google": "Google Flights"
+      }
+    },
+    "weekday": {
+      "options": {
+        "0": "Poniedziałek",
+        "1": "Wtorek",
+        "2": "Środa",
+        "3": "Czwartek",
+        "4": "Piątek",
+        "5": "Sobota",
+        "6": "Niedziela"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "week": {
+        "name": "Tydzień {number}"
+      },
+      "cheapest": {
+        "name": "Najtańszy lot"
+      },
+      "destination": {
+        "name": "{destination}"
+      },
+      "ryanair_search": {
+        "name": "Wyszukiwanie Ryanair"
+      },
+      "google_search": {
+        "name": "Wyszukiwanie Google Flights"
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Żadne źródło nie odpowiedziało: {error}"
+    }
+  }
+}
