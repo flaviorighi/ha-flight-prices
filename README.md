@@ -3,7 +3,11 @@
 [![Downloads](https://img.shields.io/github/downloads/flaviorighi/ha-flight-prices/total?label=downloads)](https://github.com/flaviorighi/ha-flight-prices/releases)
 [![Installations](https://img.shields.io/badge/dynamic/json?label=installations&query=%24.flight_prices.total&url=https%3A%2F%2Fanalytics.home-assistant.io%2Fcustom_integrations.json)](https://analytics.home-assistant.io/)
 
-Cheapest return flights for the coming weeks, as Home Assistant sensors. Each search has its own departure airports, destinations (or anywhere), outbound and return weekday and departure hours: for example out on Friday evening after 19:00 from Milan Malpensa or Bergamo and back on Sunday afternoon, or out on Thursday morning and back on Monday. Add as many searches as you like; all of it can be changed later from **Configure**.
+Cheapest return flights for the coming weeks that fit around your working week, as Home Assistant sensors.
+
+Flight sites let you search "Friday to Sunday", but most of what they find leaves on Friday morning or comes back on Sunday morning, and that costs two days off. Flight Prices searches by **departure hours** as well as days: out on Friday after 19:00, back on Sunday after 14:00, for each of the next 8 weekends, from one or more airports to anywhere or to a list of places. Any other pattern works too, such as out on Thursday evening and back on Monday. Add as many searches as you like; all of it can be changed later from **Configure**.
+
+Because the prices are sensors, the rest of your home can act on them: a notification when a weekend drops under a price, a trip pencilled into the family calendar (see [Automations](#automations)).
 
 ![The dashboard card of the integration, with made-up data](https://raw.githubusercontent.com/flaviorighi/ha-flight-prices/main/docs/images/card.png)
 
@@ -50,6 +54,56 @@ unique: true              # false: every week shows its own cheapest destination
 ```
 
 It reads the sensors of the search, so it follows the options: change the weeks, airports or hours and the card follows. In a sections view it takes the whole width and lays the weeks out in columns.
+
+## Automations
+
+The sensors work like any other in Home Assistant, so a price can trigger whatever you like. In these examples the search is called *Weekends from Milan*; entity IDs follow the name of your search and the language of Home Assistant, so check yours in the search's device.
+
+**A notification when a weekend gets cheap**, with the booking page on a tap:
+
+```yaml
+automation:
+  - alias: Cheap weekend
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.weekends_from_milan_cheapest_trip
+        below: 60
+    actions:
+      - action: notify.mobile_app_your_phone
+        data:
+          title: >-
+            {{ trigger.to_state.attributes.city }} for
+            {{ trigger.to_state.state | round }} {{ trigger.to_state.attributes.unit_of_measurement }}
+          message: >-
+            {{ trigger.to_state.attributes.outbound_date }} to {{ trigger.to_state.attributes.return_date }},
+            {{ trigger.to_state.attributes.trip.airline }}
+          data:
+            clickAction: "{{ trigger.to_state.attributes.trip.link }}"  # Android; url on iOS
+```
+
+**A trip pencilled into the family calendar** when one place you watch drops under a price, so everyone at home sees it. The destination sensors (one per place in the list) hold the cheapest trip to it over all the weeks:
+
+```yaml
+automation:
+  - alias: Lisbon weekend in the calendar
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.weekends_from_milan_lis
+        below: 80
+    actions:
+      - variables:
+          trip: "{{ trigger.to_state.attributes.trip }}"
+      - action: calendar.create_event
+        target:
+          entity_id: calendar.family
+        data:
+          summary: "Lisbon? {{ trip.price | round }} {{ trigger.to_state.attributes.unit_of_measurement }}, {{ trip.airline }}"
+          description: "{{ trip.link }}"
+          start_date: "{{ as_datetime(trip.outbound.departure).date() }}"
+          end_date: "{{ (as_datetime(trip['return'].departure) + timedelta(days=1)).date() }}"
+```
+
+Both trigger when the price goes under the figure, not again at every search while it stays there. The attributes of each sensor are in [What you get](#what-you-get).
 
 ## Requests
 
@@ -98,6 +152,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 - An event when a price drops below the lowest seen so far, for a destination or a week
 - More than one passenger
+- Search only the weeks you are free, read from a Home Assistant calendar
+- Destinations by region, such as "Europe only", instead of a list of airports
 
 ## Credits
 

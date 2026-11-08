@@ -165,7 +165,7 @@ Thursday from 17 until 24 · Monday from 15 until 24.
 Saturday from 6 until 14 · Saturday from 12 until 24 (same day: the week after) · Weeks 12 · Destinations a few beach places, or empty.
 
 **Watching one trip:**
-Destinations `LIS` · Sources both · Weeks 4: the sensor `sensor.<name>_lis` has the lowest price over the weeks, handy for an automation that tells you when it drops below a figure.
+Destinations `LIS` · Sources both · Weeks 4: the sensor `sensor.<name>_lis` has the lowest price over the weeks, handy for an automation that tells you when it drops below a figure (examples in the [README](../README.md#automations)).
 
 ## The dashboard card
 
