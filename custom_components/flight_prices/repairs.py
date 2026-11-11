@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from . import ISSUE_APP_MISSING, connect_entries
+from .api import connection
 from .config_flow import APP_SCHEMA, check_app
 from .const import APP_URL, CONF_URL, DEFAULT_URL
 
@@ -23,9 +24,9 @@ class AppMissingFlow(RepairsFlow):
     async def async_step_app(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            url = user_input[CONF_URL].strip().rstrip("/")
-            if not (errors := await check_app(self.hass, url)):
-                connect_entries(self.hass, url)
+            app = connection(user_input)
+            if not (errors := await check_app(self.hass, app)):
+                connect_entries(self.hass, app)
                 return self.async_create_entry(data={})
         return self.async_show_form(
             step_id="app",

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Prices</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%88%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c1f24; --muted: #5f6672; --line: #e2e5ea;
+    --accent: #1e88e5; --ok: #2e7d32; --warn: #ef6c00; --bad: #c62828; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315; --card: #1c1f23; --text: #e6e8eb; --muted: #9aa1ab; --line: #2c3036;
+      --accent: #64b5f6; --ok: #81c784; --warn: #ffb74d; --bad: #ef5350; --chip: #262a30;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 18px; margin: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .chip { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--chip); font-size: 13px; }
+  .chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+  .bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .bar.warn > span { background: var(--warn); } .bar.bad > span { background: var(--bad); }
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; margin: 10px 0; }
+  .source { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .error { color: var(--bad); overflow-wrap: anywhere; }
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  details:last-child { padding-bottom: 0; }
+  summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; color: var(--muted); margin-right: 6px; }
+  details[open] summary::before { content: "▾"; }
+  summary .when { flex: 1; }
+  .trip { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0 6px 18px; border-top: 1px dashed var(--line); }
+  .trip:first-of-type { border-top: 0; }
+  .price { font-weight: 600; white-space: nowrap; }
+  a { color: var(--accent); }
+  .empty { padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Flight Prices</h1>
+    <span class="muted small" id="version"></span>
+  </header>
+  <div id="google"></div>
+  <div id="searches"><div class="card empty muted" id="loading"></div></div>
+  <p class="muted small" id="footer"></p>
+</main>
+<script>
+"use strict";
+// Texts of the page; the language follows the browser's.
+const STRINGS = {
+  en: {
+    loading: "Loading…", failed: "The app does not answer: {error}", none: "No searches yet: set them up in the Flight Prices integration of Home Assistant.",
+    google: "Google Flights", last24: "{count} requests in the last 24 hours", planned: "up to {count} a day planned, of {limit}",
+    running: "Searching", waiting: "Waiting for Home Assistant", waitingHint: "The app restarted: the search runs again as soon as Home Assistant sends it.",
+    perDay: "Google: up to {count} requests a day", ryanair: "Ryanair", lastSearch: "last search {when}", never: "never searched yet",
+    roundRunning: "round in progress", lastAttempt: "last attempt {when}", destinations: "{count} destinations", from: "from {price}",
+    nothing: "nothing found", book: "Book", outbound: "Outbound", back: "Return", updated: "Updated {when}. The page refreshes every minute.",
+  },
+  it: {
+    loading: "Caricamento…", failed: "L'app non risponde: {error}", none: "Nessuna ricerca: impostale nell'integrazione Flight Prices di Home Assistant.",
+    google: "Google Flights", last24: "{count} richieste nelle ultime 24 ore", planned: "fino a {count} al giorno previste, su {limit}",
+    running: "In ricerca", waiting: "In attesa di Home Assistant", waitingHint: "L'app è ripartita: la ricerca riprende appena Home Assistant la rimanda.",
+    perDay: "Google: fino a {count} richieste al giorno", ryanair: "Ryanair", lastSearch: "ultima ricerca {when}", never: "non ha ancora cercato",
+    roundRunning: "giro in corso", lastAttempt: "ultimo tentativo {when}", destinations: "{count} destinazioni", from: "da {price}",
+    nothing: "niente trovato", book: "Prenota", outbound: "Andata", back: "Ritorno", updated: "Aggiornata {when}. La pagina si aggiorna ogni minuto.",
+  },
+  de: {
+    loading: "Wird geladen…", failed: "Die App antwortet nicht: {error}", none: "Noch keine Suchen: richte sie in der Flight Prices-Integration von Home Assistant ein.",
+    google: "Google Flights", last24: "{count} Anfragen in den letzten 24 Stunden", planned: "bis zu {count} pro Tag geplant, von {limit}",
+    running: "Sucht", waiting: "Wartet auf Home Assistant", waitingHint: "Die App wurde neu gestartet: Die Suche läuft weiter, sobald Home Assistant sie erneut sendet.",
+    perDay: "Google: bis zu {count} Anfragen pro Tag", ryanair: "Ryanair", lastSearch: "letzte Suche {when}", never: "noch nie gesucht",
+    roundRunning: "Durchlauf läuft", lastAttempt: "letzter Versuch {when}", destinations: "{count} Ziele", from: "ab {price}",
+    nothing: "nichts gefunden", book: "Buchen", outbound: "Hinflug", back: "Rückflug", updated: "Aktualisiert {when}. Die Seite aktualisiert sich jede Minute.",
+  },
+  es: {
+    loading: "Cargando…", failed: "La app no responde: {error}", none: "Aún no hay búsquedas: configúralas en la integración Flight Prices de Home Assistant.",
+    google: "Google Flights", last24: "{count} solicitudes en las últimas 24 horas", planned: "hasta {count} al día previstas, de {limit}",
+    running: "Buscando", waiting: "Esperando a Home Assistant", waitingHint: "La app se reinició: la búsqueda sigue en cuanto Home Assistant la vuelva a enviar.",
+    perDay: "Google: hasta {count} solicitudes al día", ryanair: "Ryanair", lastSearch: "última búsqueda {when}", never: "aún no ha buscado",
+    roundRunning: "ronda en curso", lastAttempt: "último intento {when}", destinations: "{count} destinos", from: "desde {price}",
+    nothing: "nada encontrado", book: "Reservar", outbound: "Ida", back: "Vuelta", updated: "Actualizada {when}. La página se actualiza cada minuto.",
+  },
+  fr: {
+    loading: "Chargement…", failed: "L'app ne répond pas : {error}", none: "Aucune recherche : configure-les dans l'intégration Flight Prices de Home Assistant.",
+    google: "Google Flights", last24: "{count} requêtes ces dernières 24 heures", planned: "jusqu'à {count} par jour prévues, sur {limit}",
+    running: "Recherche en cours", waiting: "En attente de Home Assistant", waitingHint: "L'app a redémarré : la recherche reprend dès que Home Assistant la renvoie.",
+    perDay: "Google : jusqu'à {count} requêtes par jour", ryanair: "Ryanair", lastSearch: "dernière recherche {when}", never: "pas encore de recherche",
+    roundRunning: "tour en cours", lastAttempt: "dernière tentative {when}", destinations: "{count} destinations", from: "dès {price}",
+    nothing: "rien trouvé", book: "Réserver", outbound: "Aller", back: "Retour", updated: "Mise à jour {when}. La page se met à jour chaque minute.",
+  },
+  pl: {
+    loading: "Ładowanie…", failed: "Aplikacja nie odpowiada: {error}", none: "Brak wyszukiwań: skonfiguruj je w integracji Flight Prices w Home Assistant.",
+    google: "Google Flights", last24: "{count} zapytań w ciągu ostatnich 24 godzin", planned: "do {count} dziennie zaplanowanych, z {limit}",
+    running: "Wyszukuje", waiting: "Czeka na Home Assistant", waitingHint: "Aplikacja została uruchomiona ponownie: wyszukiwanie wróci, gdy Home Assistant je ponownie wyśle.",
+    perDay: "Google: do {count} zapytań dziennie", ryanair: "Ryanair", lastSearch: "ostatnie wyszukiwanie {when}", never: "jeszcze nie wyszukiwało",
+    roundRunning: "runda w toku", lastAttempt: "ostatnia próba {when}", destinations: "{count} kierunków", from: "od {price}",
+    nothing: "nic nie znaleziono", book: "Zarezerwuj", outbound: "Wylot", back: "Powrót", updated: "Zaktualizowano {when}. Strona odświeża się co minutę.",
+  },
+};
+const LANG = (navigator.language || "en").slice(0, 2).toLowerCase();
+const TEXTS = STRINGS[LANG] || STRINGS.en;
+document.documentElement.lang = STRINGS[LANG] ? LANG : "en";
+
+function t(key, values = {}) {
+  return (TEXTS[key] || STRINGS.en[key]).replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ""));
+}
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+function safeUrl(url) {
+  return /^https?:\/\//i.test(url || "") ? url : null;
+}
+const rtf = new Intl.RelativeTimeFormat(document.documentElement.lang, { numeric: "auto" });
+function ago(iso) {
+  if (!iso) return "";
+  const minutes = Math.round((new Date(iso) - Date.now()) / 60000);
+  if (Math.abs(minutes) < 60) return rtf.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 48) return rtf.format(hours, "hour");
+  return rtf.format(Math.round(hours / 24), "day");
+}
+const day = new Intl.DateTimeFormat(document.documentElement.lang, { day: "numeric", month: "short" });
+function dates(from, to) {
+  return `${day.format(new Date(from + "T12:00"))} – ${day.format(new Date(to + "T12:00"))}`;
+}
+function hour(iso) {
+  return iso ? iso.slice(11, 16) : "";
+}
+function money(value, currency) {
+  try {
+    return new Intl.NumberFormat(document.documentElement.lang, { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return `${Math.round(value)} ${currency}`;
+  }
+}
+async function api(path) {
+  // Relative: the same page works on the app's port and behind Home Assistant's ingress.
+  const response = await fetch(`api/${path}`, { cache: "no-store", credentials: "same-origin" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+function googleBox(google) {
+  const share = Math.min(100, (google.day / google.limit) * 100);
+  const level = google.day > google.limit ? "bad" : google.day >= google.limit * 2 / 3 ? "warn" : "";
+  return `<div class="card">
+    <div class="row"><h2>${t("google")}</h2><span class="muted">${t("last24", { count: google.last_24h })}</span></div>
+    <div class="bar ${level}"><span style="width:${share.toFixed(1)}%"></span></div>
+    <div class="muted small">${t("planned", { count: google.day, limit: google.limit })}</div>
+  </div>`;
+}
+
+function sourceBox(name, state) {
+  const label = name === "google" ? t("google") : t("ryanair");
+  const status = state.running
+    ? `<span class="chip warn">${t("roundRunning")}</span>`
+    : state.error ? `<span class="chip bad">!</span>` : state.last_success ? `<span class="chip ok">✓</span>` : "";
+  const when = state.last_success ? t("lastSearch", { when: ago(state.last_success) }) : t("never");
+  const attempt = state.error && state.last_attempt ? ` · ${t("lastAttempt", { when: ago(state.last_attempt) })}` : "";
+  return `<div class="source">
+    <div class="row"><strong>${label}</strong>${status}</div>
+    <div class="muted small">${esc(when)}${esc(attempt)}</div>
+    ${state.error ? `<div class="error small">${esc(state.error)}</div>` : ""}
+  </div>`;
+}
+
+function tripRow(trip, currency) {
+  const link = safeUrl(trip.link);
+  const back = safeUrl(trip.return_link);
+  const out = trip.outbound || {};
+  const ret = trip.return || {};
+  const links = back
+    ? `<a href="${esc(link)}" target="_blank" rel="noopener">${t("outbound")}</a> · <a href="${esc(back)}" target="_blank" rel="noopener">${t("back")}</a>`
+    : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${t("book")}</a>` : "";
+  return `<div class="trip">
+    <div>
+      <div><strong>${esc(trip.city || trip.destination)}</strong> <span class="muted small">${esc(trip.origin)} → ${esc(trip.destination)}</span></div>
+      <div class="muted small">${esc(hour(out.departure))}–${esc(hour(out.arrival))} · ${esc(hour(ret.departure))}–${esc(hour(ret.arrival))} · ${esc(trip.airline)}${trip.country ? " · " + esc(trip.country) : ""}</div>
+    </div>
+    <div style="text-align:right"><div class="price">${esc(money(trip.price, currency))}</div><div class="small">${links}</div></div>
+  </div>`;
+}
+
+function weekBox(week, currency) {
+  const trips = week.trips || [];
+  const summary = trips.length
+    ? `${t("destinations", { count: week.destinations_found })} · ${t("from", { price: money(trips[0].price, currency) })}`
+    : t("nothing");
+  return `<details>
+    <summary><span class="when">${esc(dates(week.outbound_date, week.return_date))}</span><span class="muted small">${esc(summary)}</span></summary>
+    ${trips.slice(0, 15).map((trip) => tripRow(trip, currency)).join("")}
+  </details>`;
+}
+
+function searchBox(item, result) {
+  const chip = item.running ? `<span class="chip ok">${t("running")}</span>` : `<span class="chip warn">${t("waiting")}</span>`;
+  const google = item.google_day ? `<span class="muted small">${t("perDay", { count: item.google_day })}</span>` : "";
+  let body = `<p class="muted small">${t("waitingHint")}</p>`;
+  if (result) {
+    const sources = Object.entries(result.sources).map(([name, state]) => sourceBox(name, state)).join("");
+    body = `<div class="sources">${sources}</div>${result.weeks.map((week) => weekBox(week, result.currency)).join("")}`;
+  }
+  return `<div class="card" data-id="${esc(item.id)}">
+    <div class="row"><h2>${esc(item.title || item.id)}</h2>${chip}${google}</div>
+    ${body}
+  </div>`;
+}
+
+async function refresh() {
+  // Weeks opened by hand stay open across refreshes.
+  const open = new Set([...document.querySelectorAll("details[open]")].map((el) => el.closest(".card")?.dataset.id + "|" + el.querySelector(".when")?.textContent));
+  try {
+    const [info, searches] = await Promise.all([api("info"), api("searches")]);
+    const results = await Promise.all(searches.map((item) => (item.running ? api(`searches/${encodeURIComponent(item.id)}`).catch(() => null) : null)));
+    document.getElementById("version").textContent = `v${info.version}`;
+    document.getElementById("google").innerHTML = googleBox(info.google);
+    document.getElementById("searches").innerHTML = searches.length
+      ? searches.map((item, index) => searchBox(item, results[index])).join("")
+      : `<div class="card empty muted">${t("none")}</div>`;
+    for (const el of document.querySelectorAll("details")) {
+      if (open.has(el.closest(".card")?.dataset.id + "|" + el.querySelector(".when")?.textContent)) el.open = true;
+    }
+    document.getElementById("footer").textContent = t("updated", { when: new Date().toLocaleTimeString(document.documentElement.lang, { hour: "2-digit", minute: "2-digit" }) });
+  } catch (err) {
+    document.getElementById("searches").innerHTML = `<div class="card error">${esc(t("failed", { error: err.message }))}</div>`;
+  }
+}
+
+document.getElementById("loading").textContent = t("loading");
+refresh();
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
 
-from .const import API_VERSION
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import API_VERSION, CONF_PASSWORD, CONF_URL
 
 TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -37,13 +41,16 @@ class Incompatible(AppError):
 class FlightPricesApp:
     """Client of the app's HTTP API."""
 
-    def __init__(self, session: aiohttp.ClientSession, url: str) -> None:
+    def __init__(self, session: aiohttp.ClientSession, url: str, password: str | None = None) -> None:
         self._session = session
         self.url = url.rstrip("/")
+        self._headers = {"Authorization": f"Bearer {password}"} if password else {}
 
     async def _request(self, method: str, path: str, json: Any = None) -> tuple[int, Any]:
         try:
-            async with self._session.request(method, f"{self.url}{path}", json=json, timeout=TIMEOUT) as response:
+            async with self._session.request(
+                method, f"{self.url}{path}", json=json, headers=self._headers, timeout=TIMEOUT
+            ) as response:
                 data = await response.json(content_type=None) if response.status != 204 else None
                 if response.status >= 400 and response.status != 404:
                     error = data if isinstance(data, dict) else {}
@@ -61,9 +68,15 @@ class FlightPricesApp:
             raise Incompatible(str(data["version"]))
         return data
 
-    async def count_requests(self, options: dict[str, Any]) -> dict[str, Any]:
-        """How many requests these options would make, as the app counts them."""
-        _status, data = await self._request("POST", "/api/requests", {"options": options})
+    async def count_requests(self, options: dict[str, Any], search_id: str | None = None) -> dict[str, Any]:
+        """How many requests these options would make, alone and with the app's other searches.
+
+        search_id is the search being changed: its own requests are not counted twice.
+        """
+        body: dict[str, Any] = {"options": options}
+        if search_id:
+            body["search_id"] = search_id
+        _status, data = await self._request("POST", "/api/requests", body)
         return data
 
     async def get_search(self, search_id: str) -> dict[str, Any] | None:
@@ -78,3 +91,16 @@ class FlightPricesApp:
 
     async def delete_search(self, search_id: str) -> None:
         await self._request("DELETE", f"/api/searches/{search_id}")
+
+
+def app_client(hass: HomeAssistant, data: Mapping[str, Any]) -> FlightPricesApp:
+    """The app an entry, or a form, points to."""
+    return FlightPricesApp(async_get_clientsession(hass), data[CONF_URL], data.get(CONF_PASSWORD))
+
+
+def connection(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Where the app is and its password, as entries keep them: no empty password."""
+    result: dict[str, Any] = {CONF_URL: str(data[CONF_URL]).strip().rstrip("/")}
+    if password := data.get(CONF_PASSWORD):
+        result[CONF_PASSWORD] = password
+    return result

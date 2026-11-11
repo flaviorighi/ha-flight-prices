@@ -11,7 +11,6 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlowWithReload
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -26,8 +25,8 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
-from . import connect_entries
-from .api import AppError, FlightPricesApp, Incompatible
+from . import connect_entries, known_app
+from .api import AppError, FlightPricesApp, Incompatible, app_client, connection
 from .const import (
     APP_URL,
     CONF_DESTINATIONS,
@@ -40,6 +39,7 @@ from .const import (
     CONF_OUTBOUND_DAY,
     CONF_OUTBOUND_FROM,
     CONF_OUTBOUND_TO,
+    CONF_PASSWORD,
     CONF_RETURN_DAY,
     CONF_RETURN_FROM,
     CONF_RETURN_TO,
@@ -108,7 +108,12 @@ SEARCH_SCHEMA = vol.Schema(
         vol.Required(CONF_DIRECT_ONLY, default=DEFAULT_DIRECT_ONLY): BooleanSelector(),
     }
 )
-APP_SCHEMA = vol.Schema({vol.Required(CONF_URL): TextSelector(TextSelectorConfig(type=TextSelectorType.URL))})
+APP_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_URL): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
+        vol.Optional(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+    }
+)
 USER_SCHEMA = vol.Schema({vol.Required(CONF_NAME): TextSelector()}).extend(SEARCH_SCHEMA.schema)
 OPTIONS_SCHEMA = SEARCH_SCHEMA.extend(
     {
@@ -125,15 +130,19 @@ def _codes(values: Any) -> list[str]:
     return list(dict.fromkeys(code.strip().upper() for code in values or () if code.strip()))
 
 
-async def count(app: FlightPricesApp, options: Mapping[str, Any]) -> tuple[dict[str, Any] | None, dict[str, str]]:
-    """What the app counts for these options, and the errors to show."""
+async def count(
+    app: FlightPricesApp, options: Mapping[str, Any], search_id: str | None = None
+) -> tuple[dict[str, Any] | None, dict[str, str]]:
+    """What the app counts for these options, with its other searches, and the errors to show."""
     try:
-        requests = await app.count_requests(dict(options))
-    except AppError:
-        return None, {"base": "cannot_connect"}
+        requests = await app.count_requests(dict(options), search_id)
+    except AppError as err:
+        return None, {"base": "invalid_auth" if err.code == "invalid_auth" else "cannot_connect"}
+    # Many requests from one address get it a captcha from Google, for the whole home.
     if requests["too_many"]:
-        # Many requests from one address get it a captcha from Google, for the whole home.
         return requests, {CONF_GOOGLE_DESTINATIONS: "google_too_many"}
+    if requests.get("too_many_total"):
+        return requests, {CONF_GOOGLE_DESTINATIONS: "google_too_many_total"}
     return requests, {}
 
 
@@ -144,6 +153,8 @@ def placeholders(requests: Mapping[str, Any] | None) -> dict[str, str]:
     # Without an answer from the app the numbers are unknown; an error says why.
     values |= {key: str(requests[key]) if requests else "…" for key in keys}
     values["count"] = values["google_day"]
+    # This search with the app's others: they all come from the same connection.
+    values["total"] = str(requests.get("total_day", requests["google_day"])) if requests else "…"
     return values
 
 
@@ -209,22 +220,15 @@ def _suggested(options: Mapping[str, Any]) -> dict[str, Any]:
     return values
 
 
-async def check_app(hass: HomeAssistant, url: str) -> dict[str, str]:
-    """The errors of an address that is not a Flight Prices app this integration can talk to."""
+async def check_app(hass: HomeAssistant, app: Mapping[str, Any]) -> dict[str, str]:
+    """The errors of an app this integration cannot talk to: wrong address, password or version."""
     try:
-        await FlightPricesApp(async_get_clientsession(hass), url).info()
+        await app_client(hass, app).info()
     except Incompatible:
         return {"base": "incompatible"}
-    except AppError:
-        return {"base": "cannot_connect"}
+    except AppError as err:
+        return {"base": "invalid_auth" if err.code == "invalid_auth" else "cannot_connect"}
     return {}
-
-
-def known_url(hass: HomeAssistant) -> str | None:
-    """The app the other searches use: one app runs every search."""
-    return next(
-        (entry.data[CONF_URL] for entry in hass.config_entries.async_entries(DOMAIN) if CONF_URL in entry.data), None
-    )
 
 
 class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -242,26 +246,29 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         self._name = ""
         self._options: dict[str, Any] = {}
         self._requests: dict[str, Any] | None = None
-        self._url: str | None = None
+        # Where the app is, and its password if it has one.
+        self._app_data: dict[str, Any] | None = None
 
     def _app(self) -> FlightPricesApp:
-        assert self._url is not None
-        return FlightPricesApp(async_get_clientsession(self.hass), self._url)
+        assert self._app_data is not None
+        return app_client(self.hass, self._app_data)
 
     async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
         """The app announced itself: connect the searches waiting for it, or offer a first search."""
-        url = f"http://{discovery_info.config['host']}:{discovery_info.config['port']}"
+        config = discovery_info.config
+        app = connection({CONF_URL: f"http://{config['host']}:{config['port']}", CONF_PASSWORD: config.get("password")})
         # One flow for the app, however many times it starts.
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
-        if await check_app(self.hass, url):
+        if await check_app(self.hass, app):
             return self.async_abort(reason="cannot_connect")
-        if connect_entries(self.hass, url):
+        # Searches waiting for the app, or a password changed in the app's options.
+        if connect_entries(self.hass, app):
             return self.async_abort(reason="app_connected")
         if self.hass.config_entries.async_entries(DOMAIN):
             # Searches already connected, to this app or to another one by choice.
             return self.async_abort(reason="already_configured")
-        self._url = url
+        self._app_data = app
         return await self.async_step_hassio_confirm()
 
     async def async_step_hassio_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -275,9 +282,9 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         """Where the app is, when Home Assistant did not find it: Docker, or another machine."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            url = user_input[CONF_URL].strip().rstrip("/")
-            if not (errors := await check_app(self.hass, url)):
-                self._url = url
+            app = connection(user_input)
+            if not (errors := await check_app(self.hass, app)):
+                self._app_data = app
                 return await self.async_step_user()
         return self.async_show_form(
             step_id="app",
@@ -287,10 +294,10 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if self._url is None:
-            if (url := known_url(self.hass)) is None:
+        if self._app_data is None:
+            if (app := known_app(self.hass)) is None:
                 return await self.async_step_app()
-            self._url = url
+            self._app_data = app
         errors: dict[str, str] = {}
         options: dict[str, Any] = {}
         if user_input is not None:
@@ -333,7 +340,8 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         return self._summary()
 
     async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self.async_create_entry(title=self._name, data={CONF_URL: self._url}, options=self._options)
+        assert self._app_data is not None
+        return self.async_create_entry(title=self._name, data=self._app_data, options=self._options)
 
     async def async_step_change(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self.async_step_user()
@@ -343,14 +351,14 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
-            url = user_input[CONF_URL].strip().rstrip("/")
-            if not (errors := await check_app(self.hass, url)):
+            app = connection(user_input)
+            if not (errors := await check_app(self.hass, app)):
                 old = entry.data.get(CONF_URL)
                 for other in self.hass.config_entries.async_entries(DOMAIN):
                     if other.entry_id != entry.entry_id and other.data.get(CONF_URL) == old:
-                        self.hass.config_entries.async_update_entry(other, data={**other.data, CONF_URL: url})
+                        self.hass.config_entries.async_update_entry(other, data=app)
                         self.hass.config_entries.async_schedule_reload(other.entry_id)
-                return self.async_update_reload_and_abort(entry, data_updates={CONF_URL: url})
+                return self.async_update_reload_and_abort(entry, data=app)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(APP_SCHEMA, user_input or dict(entry.data)),
@@ -368,7 +376,7 @@ class FlightPricesOptionsFlow(OptionsFlowWithReload):
         self._requests: dict[str, Any] | None = None
 
     def _app(self) -> FlightPricesApp:
-        return FlightPricesApp(async_get_clientsession(self.hass), self.config_entry.data[CONF_URL])
+        return app_client(self.hass, self.config_entry.data)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if CONF_URL not in self.config_entry.data:
@@ -377,7 +385,7 @@ class FlightPricesOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             options, errors = validate(user_input)
             if not errors:
-                requests, errors = await count(self._app(), options)
+                requests, errors = await count(self._app(), options, self.config_entry.entry_id)
                 if not errors:
                     self._options, self._requests = options, requests
                     if requests and requests["google_round"]:
@@ -386,7 +394,9 @@ class FlightPricesOptionsFlow(OptionsFlowWithReload):
         current = user_input or self._options or self.config_entry.options
         # Opening Configure shows what the saved search makes; after an error, what was sent.
         requests, count_errors = await count(
-            self._app(), validate(user_input)[0] if user_input else self.config_entry.options
+            self._app(),
+            validate(user_input)[0] if user_input else self.config_entry.options,
+            self.config_entry.entry_id,
         )
         return self.async_show_form(
             step_id="init",

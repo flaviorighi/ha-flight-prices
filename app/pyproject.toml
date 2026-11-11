@@ -28,6 +28,10 @@ version = { attr = "flight_prices_engine.__version__" }
 [tool.setuptools.packages.find]
 include = ["flight_prices_engine*"]
 
+[tool.setuptools.package-data]
+# The app's page.
+flight_prices_engine = ["web/*.html"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

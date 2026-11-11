@@ -126,10 +126,15 @@ Flight Prices has two parts: the **app** searches, outside Home Assistant, and t
 **The app, with Docker** (Home Assistant in a container, or another machine):
 
 ```sh
-docker run -d --name flight-prices --restart unless-stopped   -p 8765:8765 -v flight-prices:/data   ghcr.io/flaviorighi/flight-prices-app:1.0.0b0
+docker run -d --name flight-prices --restart unless-stopped \
+  -p 8765:8765 -v flight-prices:/data \
+  -e FLIGHT_PRICES_PASSWORD=choose-a-password \
+  ghcr.io/flaviorighi/flight-prices-app:1.0.0b0
 ```
 
-The integration then asks for its address, such as `http://192.168.1.10:8765`. Anyone who can reach the port can start searches from your connection: keep it inside your network.
+The integration then asks for its address, such as `http://192.168.1.10:8765`, and the password. Without a password anyone who can reach the port can start searches from your connection.
+
+**The app's page** shows every search, when each source last searched and its errors, the Google Flights requests of the last 24 hours against the limit, and the trips of each week. On Home Assistant OS it is in the sidebar; with Docker, open the app's address in a browser. Searches are set up in the integration: the page only shows them.
 
 **The integration**, from the **Marketplace**, which replaced HACS in Home Assistant 2026.11: **Settings → Marketplace → Add from link**, paste `https://github.com/flaviorighi/ha-flight-prices`, install **Flight Prices** and restart Home Assistant. Updates then appear in **Settings** like those of Home Assistant. With HACS, on Home Assistant 2026.10: add this repository as a custom repository (category Integration), install **Flight Prices** and restart. By hand: copy `custom_components/flight_prices` into your `config/custom_components` and restart.
 

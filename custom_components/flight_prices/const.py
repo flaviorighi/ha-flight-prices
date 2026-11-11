@@ -54,6 +54,8 @@ GOOGLE_MIN_HOURS: Final = 12
 UPDATE_INTERVAL: Final = timedelta(minutes=1)
 # Where the app is: http://<host>:<port>, from the Supervisor's discovery or typed in.
 CONF_URL: Final = "url"
+# Only when the app has one: the Supervisor's discovery passes it, or it is typed in.
+CONF_PASSWORD: Final = "password"
 DEFAULT_URL: Final = "http://localhost:8765"
 # The version of the app's API this integration speaks.
 API_VERSION: Final = 1

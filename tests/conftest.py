@@ -141,6 +141,10 @@ class FakeApp:
         self.online = True
         self.api = 1
         self.refuse: str | None = None
+        # The app's password, and the Google requests a day of its other searches.
+        self.password: str | None = None
+        self.other_day = 0
+        self.counted: list[dict[str, Any]] = []
         self.mock = mock
         mock.get(f"{APP}/api/info", side_effect=self._info)
         mock.post(f"{APP}/api/requests", side_effect=self._requests)
@@ -152,13 +156,29 @@ class FakeApp:
     def _response(self, method: str, url: URL, json: Any = None, status: int = 200) -> AiohttpClientMockResponse:
         if not self.online:
             return AiohttpClientMockResponse(method, url, exc=aiohttp.ClientConnectionError("refused"))
+        headers = self.mock.mock_calls[-1][3] or {}
+        if self.password and headers.get("Authorization") != f"Bearer {self.password}":
+            return AiohttpClientMockResponse(method, url, json={"error": "invalid_auth"}, status=401)
         return AiohttpClientMockResponse(method, url, json=json, status=status)
 
     async def _info(self, method: str, url: URL, data: Any) -> AiohttpClientMockResponse:
         return self._response(method, url, {"version": "1.0.0b0", "api": self.api, "searches": sorted(self.searches)})
 
     async def _requests(self, method: str, url: URL, data: Any) -> AiohttpClientMockResponse:
-        return self._response(method, url, count_requests(data["options"]).as_dict())
+        self.counted.append(data)
+        requests = count_requests(data["options"]).as_dict()
+        total = self.other_day + requests["google_day"]
+        return self._response(
+            method,
+            url,
+            {
+                **requests,
+                "other_day": self.other_day,
+                "total_day": total,
+                "high": total >= 200,
+                "too_many_total": requests["google_day"] > 0 and total > 300,
+            },
+        )
 
     async def _get(self, method: str, url: URL, data: Any) -> AiohttpClientMockResponse:
         search_id = url.path.rsplit("/", 1)[1]
@@ -169,10 +189,13 @@ class FakeApp:
     async def _put(self, method: str, url: URL, data: Any) -> AiohttpClientMockResponse:
         if self.refuse:
             return self._response(method, url, {"error": self.refuse, "message": self.refuse}, 400)
-        search_id = url.path.rsplit("/", 1)[1]
-        self.searches[search_id] = data
-        self.puts.append(data)
-        return self._response(method, url, copy.deepcopy(self.answer))
+        response = self._response(method, url, copy.deepcopy(self.answer))
+        if response.status == 200 and response.exc is None:
+            # Only a search the app accepted runs there.
+            search_id = url.path.rsplit("/", 1)[1]
+            self.searches[search_id] = data
+            self.puts.append(data)
+        return response
 
     async def _delete(self, method: str, url: URL, data: Any) -> AiohttpClientMockResponse:
         search_id = url.path.rsplit("/", 1)[1]
@@ -200,11 +223,14 @@ def app(aioclient_mock: AiohttpClientMocker) -> FakeApp:
     return FakeApp(aioclient_mock)
 
 
-def make_entry(version: int = 2, url: str | None = APP, **options: Any) -> MockConfigEntry:
+def make_entry(version: int = 2, url: str | None = APP, password: str | None = None, **options: Any) -> MockConfigEntry:
+    data: dict[str, Any] = {CONF_URL: url} if url else {}
+    if password:
+        data["password"] = password
     return MockConfigEntry(
         domain=DOMAIN,
         title="Weekend",
         version=version,
-        data={CONF_URL: url} if url else {},
+        data=data,
         options={**OPTIONS, **options},
     )

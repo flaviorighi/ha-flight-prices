@@ -55,10 +55,12 @@
         "title": "Flight Prices app",
         "description": "The searches run in the Flight Prices app. On Home Assistant OS, install it from the app store ([how]({app_url})) and Home Assistant finds it by itself. With Docker, start its container and enter its address here.",
         "data": {
-          "url": "App address"
+          "url": "App address",
+          "password": "Password"
         },
         "data_description": {
-          "url": "For example `http://192.168.1.10:8765`."
+          "url": "For example `http://192.168.1.10:8765`.",
+          "password": "Only if the app has one, set in its options or with FLIGHT_PRICES_PASSWORD."
         }
       },
       "hassio_confirm": {
@@ -69,10 +71,12 @@
         "title": "App address",
         "description": "Every search that uses this app moves to the new address.",
         "data": {
-          "url": "App address"
+          "url": "App address",
+          "password": "Password"
         },
         "data_description": {
-          "url": "For example `http://192.168.1.10:8765`."
+          "url": "For example `http://192.168.1.10:8765`.",
+          "password": "Only if the app has one, set in its options or with FLIGHT_PRICES_PASSWORD."
         }
       }
     },
@@ -85,7 +89,9 @@
       "invalid_country": "Use two-letter ISO country codes, such as IT.",
       "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval.",
       "cannot_connect": "The app does not answer at this address. Is it started?",
-      "incompatible": "The app and the integration have different versions: update both to the latest release."
+      "incompatible": "The app and the integration have different versions: update both to the latest release.",
+      "invalid_auth": "The app asks for a password, and this one is not it.",
+      "google_too_many_total": "Together with the app's other searches, Google Flights would make up to {total} requests a day from your connection, more than the {limit} that keep it safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval, here or in the other searches."
     },
     "abort": {
       "already_configured": "This search already exists.",
@@ -157,7 +163,9 @@
       "invalid_hours": "The end must come after the start.",
       "invalid_country": "Use two-letter ISO country codes, such as IT.",
       "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval.",
-      "cannot_connect": "The app does not answer at this address. Is it started?"
+      "cannot_connect": "The app does not answer at this address. Is it started?",
+      "invalid_auth": "The app asks for a password, and this one is not it.",
+      "google_too_many_total": "Together with the app's other searches, Google Flights would make up to {total} requests a day from your connection, more than the {limit} that keep it safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval, here or in the other searches."
     },
     "abort": {
       "app_missing": "This search needs the Flight Prices app: install it ([how]({app_url})) and fix the issue in Repairs."
@@ -213,6 +221,9 @@
     },
     "app_missing": {
       "message": "The Flight Prices app is missing: see Repairs."
+    },
+    "invalid_auth": {
+      "message": "The Flight Prices app asks for a password: set it from Reconfigure."
     }
   },
   "issues": {
@@ -224,16 +235,19 @@
             "title": "Flight Prices needs its app",
             "description": "From version 1.0 the searches run in the Flight Prices app, outside Home Assistant. Install the app ([how]({app_url})): on Home Assistant OS it is found by itself and your searches move to it, keeping what they found. With Docker, start its container and enter its address here.",
             "data": {
-              "url": "App address"
+              "url": "App address",
+              "password": "Password"
             },
             "data_description": {
-              "url": "For example `http://192.168.1.10:8765`."
+              "url": "For example `http://192.168.1.10:8765`.",
+              "password": "Only if the app has one, set in its options or with FLIGHT_PRICES_PASSWORD."
             }
           }
         },
         "error": {
           "cannot_connect": "The app does not answer at this address. Is it started?",
-          "incompatible": "The app and the integration have different versions: update both to the latest release."
+          "incompatible": "The app and the integration have different versions: update both to the latest release.",
+          "invalid_auth": "The app asks for a password, and this one is not it."
         }
       }
     }

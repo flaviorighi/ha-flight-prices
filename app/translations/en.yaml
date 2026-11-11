@@ -2,7 +2,11 @@ configuration:
   log_level:
     name: Log level
     description: How much the app writes in its log. Debug shows every request.
+  password:
+    name: Password
+    description: "Needed only if you open the port: the page and the API then ask for it. Home Assistant gets it by itself; the page in the sidebar never asks."
 network:
   8765/tcp: >-
-    Only for a Home Assistant on another machine. Home Assistant on this machine reaches the app
-    without it. Anyone who can reach the port can start searches from your connection.
+    Only for a Home Assistant on another machine, or to open the page without Home Assistant.
+    Set a password first: without one, anyone who can reach the port can start searches from your
+    connection.

@@ -128,9 +128,9 @@ async def test_options_with_the_app_stopped(hass: HomeAssistant, app: FakeApp) -
     assert result["description_placeholders"]["google_day"] == "…"
 
 
-def _discovery() -> HassioServiceInfo:
+def _discovery(**config: Any) -> HassioServiceInfo:
     return HassioServiceInfo(
-        config={"host": "flight-prices.test", "port": 8765},
+        config={"host": "flight-prices.test", "port": 8765, **config},
         name="Flight Prices",
         slug="a0d7b954_flight_prices",
         uuid="1234",
@@ -310,3 +310,55 @@ async def test_configure_shows_the_requests_of_the_saved_search(hass: HomeAssist
     result = await hass.config_entries.options.async_init(entry.entry_id)
     # 2 weeks x 2 destinations x 1 airport x 2 = 8 a day.
     assert result["description_placeholders"]["google_day"] == "8"
+
+
+async def test_app_address_with_a_password(hass: HomeAssistant, app: FakeApp) -> None:
+    app.password = "s3cret"
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": APP})
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": APP, "password": "s3cret"})
+    assert result["step_id"] == "user"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], FORM)
+    assert result["data"] == {"url": APP, "password": "s3cret"}
+
+
+async def test_discovery_brings_the_password(hass: HomeAssistant, app: FakeApp) -> None:
+    app.password = "s3cret"
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_discovery(password="s3cret")
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], FORM)
+    assert result["data"] == {"url": APP, "password": "s3cret"}
+
+
+async def test_discovery_with_a_new_password(hass: HomeAssistant, app: FakeApp) -> None:
+    """The password changed in the app's options: the searches at its address get it at its next start."""
+    entry = make_entry(password="old")
+    entry.add_to_hass(hass)
+    app.password = "new"
+    with patch("homeassistant.config_entries.ConfigEntries.async_schedule_reload") as reload:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_HASSIO}, data=_discovery(password="new")
+        )
+    assert result["reason"] == "app_connected"
+    assert entry.data == {"url": APP, "password": "new"}
+    reload.assert_called_once_with(entry.entry_id)
+
+
+async def test_google_total_with_the_other_searches(hass: HomeAssistant, app: FakeApp) -> None:
+    entry = make_entry()
+    entry.add_to_hass(hass)
+    # The app's other searches make 200 Google requests a day: 160 more are too many.
+    app.other_day = 200
+    form = {key: value for key, value in FORM.items() if key != "name"}
+    google = {"sources": ["ryanair", "google"], "google_destinations": ["LIS", "PAR", "LON", "AMS", "BCN"]}
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**form, **google, "ryanair_interval": 3, "google_interval": 24}
+    )
+    assert result["errors"] == {"google_destinations": "google_too_many_total"}
+    assert (result["description_placeholders"]["total"], result["description_placeholders"]["limit"]) == ("360", "300")
+    # Configure counts without the search itself.
+    assert app.counted[-1]["search_id"] == entry.entry_id

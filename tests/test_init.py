@@ -47,6 +47,8 @@ async def test_sensors(hass: HomeAssistant, app: FakeApp) -> None:
     sent = app.searches[entry.entry_id]
     assert sent["options"] == dict(entry.options)
     assert (sent["currency"], sent["language"], sent["time_zone"]) == ("EUR", "en", hass.config.time_zone)
+    # The name, for the app's page.
+    assert sent["title"] == "Weekend"
     assert "restore" not in sent
 
     week = hass.states.get("sensor.weekend_week_1")
@@ -222,3 +224,18 @@ async def test_removing_the_search_without_app_removes_the_repair(hass: HomeAssi
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_MISSING) is None
     assert app.deleted == []
+
+
+async def test_app_with_a_password(hass: HomeAssistant, app: FakeApp, frozen: FrozenDateTimeFactory) -> None:
+    app.password = "s3cret"
+    entry = await _setup(hass, make_entry(password="s3cret"))
+    assert entry.state is ConfigEntryState.LOADED
+    # The password changed in the app: the sensors become unavailable until Reconfigure.
+    app.password = "other"
+    frozen.tick(timedelta(minutes=1, seconds=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.weekend_week_1").state == "unavailable"
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR

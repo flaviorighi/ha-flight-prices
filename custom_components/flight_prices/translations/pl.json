@@ -55,10 +55,12 @@
         "title": "Aplikacja Flight Prices",
         "description": "Wyszukiwania działają w aplikacji Flight Prices. W Home Assistant OS zainstaluj ją ze sklepu aplikacji ([jak]({app_url})), a Home Assistant sam ją znajdzie. W Dockerze uruchom jej kontener i wpisz tutaj jej adres.",
         "data": {
-          "url": "Adres aplikacji"
+          "url": "Adres aplikacji",
+          "password": "Hasło"
         },
         "data_description": {
-          "url": "Na przykład `http://192.168.1.10:8765`."
+          "url": "Na przykład `http://192.168.1.10:8765`.",
+          "password": "Tylko jeśli aplikacja ma hasło, ustawione w jej opcjach lub przez FLIGHT_PRICES_PASSWORD."
         }
       },
       "hassio_confirm": {
@@ -69,10 +71,12 @@
         "title": "Adres aplikacji",
         "description": "Wszystkie wyszukiwania korzystające z tej aplikacji przechodzą na nowy adres.",
         "data": {
-          "url": "Adres aplikacji"
+          "url": "Adres aplikacji",
+          "password": "Hasło"
         },
         "data_description": {
-          "url": "Na przykład `http://192.168.1.10:8765`."
+          "url": "Na przykład `http://192.168.1.10:8765`.",
+          "password": "Tylko jeśli aplikacja ma hasło, ustawione w jej opcjach lub przez FLIGHT_PRICES_PASSWORD."
         }
       }
     },
@@ -85,7 +89,9 @@
       "invalid_country": "Użyj dwuliterowych kodów krajów ISO, na przykład PL.",
       "google_too_many": "Google Flights wykonałoby do {count} zapytań dziennie, więcej niż {limit}, które chronią Twoje domowe łącze przed blokadą: użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału.",
       "cannot_connect": "Aplikacja nie odpowiada pod tym adresem. Czy jest uruchomiona?",
-      "incompatible": "Aplikacja i integracja mają różne wersje: zaktualizuj obie do najnowszego wydania."
+      "incompatible": "Aplikacja i integracja mają różne wersje: zaktualizuj obie do najnowszego wydania.",
+      "invalid_auth": "Aplikacja wymaga hasła, a to nie jest właściwe.",
+      "google_too_many_total": "Razem z innymi wyszukiwaniami aplikacji Google Flights wykonywałby do {total} zapytań dziennie z Twojego połączenia, więcej niż {limit}, które chronią je przed blokadą: użyj mniej kierunków Google, lotnisk wylotu lub tygodni albo dłuższego interwału, tutaj lub w innych wyszukiwaniach."
     },
     "abort": {
       "already_configured": "To wyszukiwanie już istnieje.",
@@ -157,7 +163,9 @@
       "invalid_hours": "Koniec musi być po początku.",
       "invalid_country": "Użyj dwuliterowych kodów krajów ISO, na przykład PL.",
       "google_too_many": "Google Flights wykonałoby do {count} zapytań dziennie, więcej niż {limit}, które chronią Twoje domowe łącze przed blokadą: użyj mniej celów Google, lotnisk wylotu lub tygodni albo dłuższego interwału.",
-      "cannot_connect": "Aplikacja nie odpowiada pod tym adresem. Czy jest uruchomiona?"
+      "cannot_connect": "Aplikacja nie odpowiada pod tym adresem. Czy jest uruchomiona?",
+      "invalid_auth": "Aplikacja wymaga hasła, a to nie jest właściwe.",
+      "google_too_many_total": "Razem z innymi wyszukiwaniami aplikacji Google Flights wykonywałby do {total} zapytań dziennie z Twojego połączenia, więcej niż {limit}, które chronią je przed blokadą: użyj mniej kierunków Google, lotnisk wylotu lub tygodni albo dłuższego interwału, tutaj lub w innych wyszukiwaniach."
     },
     "abort": {
       "app_missing": "To wyszukiwanie wymaga aplikacji Flight Prices: zainstaluj ją ([jak]({app_url})) i rozwiąż problem w sekcji Naprawy."
@@ -213,6 +221,9 @@
     },
     "app_missing": {
       "message": "Brak aplikacji Flight Prices: zobacz Naprawy."
+    },
+    "invalid_auth": {
+      "message": "Aplikacja Flight Prices wymaga hasła: ustaw je w Zmień konfigurację."
     }
   },
   "issues": {
@@ -224,16 +235,19 @@
             "title": "Flight Prices potrzebuje swojej aplikacji",
             "description": "Od wersji 1.0 wyszukiwania działają w aplikacji Flight Prices, poza Home Assistant. Zainstaluj aplikację ([jak]({app_url})): w Home Assistant OS zostanie znaleziona automatycznie, a Twoje wyszukiwania przejdą do niej razem z tym, co znalazły. W Dockerze uruchom jej kontener i wpisz tutaj jej adres.",
             "data": {
-              "url": "Adres aplikacji"
+              "url": "Adres aplikacji",
+              "password": "Hasło"
             },
             "data_description": {
-              "url": "Na przykład `http://192.168.1.10:8765`."
+              "url": "Na przykład `http://192.168.1.10:8765`.",
+              "password": "Tylko jeśli aplikacja ma hasło, ustawione w jej opcjach lub przez FLIGHT_PRICES_PASSWORD."
             }
           }
         },
         "error": {
           "cannot_connect": "Aplikacja nie odpowiada pod tym adresem. Czy jest uruchomiona?",
-          "incompatible": "Aplikacja i integracja mają różne wersje: zaktualizuj obie do najnowszego wydania."
+          "incompatible": "Aplikacja i integracja mają różne wersje: zaktualizuj obie do najnowszego wydania.",
+          "invalid_auth": "Aplikacja wymaga hasła, a to nie jest właściwe."
         }
       }
     }

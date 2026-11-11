@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+from typing import Any
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
@@ -13,11 +14,10 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
-from .api import AppError, FlightPricesApp
-from .const import APP_URL, CONF_URL, DOMAIN
+from .api import AppError, app_client, connection
+from .const import APP_URL, CONF_PASSWORD, CONF_URL, DOMAIN
 from .coordinator import FlightPricesConfigEntry, FlightPricesCoordinator, legacy_store
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,13 +47,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     if entry.version == 1:
         # Another search already connected tells where the app is; otherwise the repair or discovery will.
-        url = next(
-            (other.data[CONF_URL] for other in hass.config_entries.async_entries(DOMAIN) if CONF_URL in other.data),
-            None,
-        )
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, **({CONF_URL: url} if url else {})}, version=2
-        )
+        app = known_app(hass)
+        hass.config_entries.async_update_entry(entry, data={**entry.data, **(app or {})}, version=2)
     return True
 
 
@@ -72,7 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FlightPricesConfigEntry)
             learn_more_url=APP_URL,
         )
         raise ConfigEntryError(translation_domain=DOMAIN, translation_key="app_missing")
-    app = FlightPricesApp(async_get_clientsession(hass), entry.data[CONF_URL])
+    app = app_client(hass, entry.data)
     coordinator = FlightPricesCoordinator(hass, entry, app)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
@@ -93,7 +88,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_MISSING)
         return
     try:
-        await FlightPricesApp(async_get_clientsession(hass), entry.data[CONF_URL]).delete_search(entry.entry_id)
+        await app_client(hass, entry.data).delete_search(entry.entry_id)
     except AppError as err:
         # Left in the app's data folder, it does not search: only a search sent again runs.
         _LOGGER.warning("Could not delete the search %s from the app: %s", entry.title, err)
@@ -103,12 +98,26 @@ def entries_without_app(hass: HomeAssistant) -> list[ConfigEntry]:
     return [entry for entry in hass.config_entries.async_entries(DOMAIN) if CONF_URL not in entry.data]
 
 
-def connect_entries(hass: HomeAssistant, url: str) -> int:
-    """Give the app's address to the searches that lack it, and set them up again."""
-    entries = entries_without_app(hass)
-    for entry in entries:
-        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_URL: url})
+def known_app(hass: HomeAssistant) -> dict[str, Any] | None:
+    """The app the other searches use: one app runs every search."""
+    return next(
+        (connection(entry.data) for entry in hass.config_entries.async_entries(DOMAIN) if CONF_URL in entry.data),
+        None,
+    )
+
+
+def connect_entries(hass: HomeAssistant, app: dict[str, Any]) -> int:
+    """Give the app to the searches that lack it, or a new password to those at its address; set them up again."""
+    changed = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if CONF_URL not in entry.data
+        or (entry.data[CONF_URL] == app[CONF_URL] and entry.data.get(CONF_PASSWORD) != app.get(CONF_PASSWORD))
+    ]
+    for entry in changed:
+        data = {key: value for key, value in entry.data.items() if key != CONF_PASSWORD}
+        hass.config_entries.async_update_entry(entry, data={**data, **app})
         hass.config_entries.async_schedule_reload(entry.entry_id)
-    if entries:
+    if not entries_without_app(hass):
         ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_MISSING)
-    return len(entries)
+    return len(changed)

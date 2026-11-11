@@ -2,7 +2,11 @@ configuration:
   log_level:
     name: Livello del registro
     description: Quanto scrive l'app nel suo registro. Debug mostra ogni richiesta.
+  password:
+    name: Password
+    description: "Serve solo se apri la porta: pagina e API la chiedono. Home Assistant la riceve da solo; la pagina nella barra laterale non la chiede mai."
 network:
   8765/tcp: >-
-    Solo per un Home Assistant su un'altra macchina. Home Assistant su questa macchina raggiunge
-    l'app senza aprirla. Chi raggiunge la porta può avviare ricerche dalla tua connessione.
+    Solo per un Home Assistant su un'altra macchina, o per aprire la pagina senza Home Assistant.
+    Imposta prima una password: senza, chi raggiunge la porta può avviare ricerche dalla tua
+    connessione.

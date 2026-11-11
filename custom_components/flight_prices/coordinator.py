@@ -81,6 +81,8 @@ class FlightPricesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "currency": self.hass.config.currency,
             "language": self.hass.config.language,
             "time_zone": self.hass.config.time_zone,
+            # For the app's page.
+            "title": self.config_entry.title,
         }
         if restore:
             search["restore"] = restore
@@ -96,6 +98,8 @@ class FlightPricesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_placeholders={"error": str(err)},
             ) from err
         except AppError as err:
+            if err.code == "invalid_auth":
+                raise ConfigEntryError(translation_domain=DOMAIN, translation_key="invalid_auth") from err
             # A search the app refuses, such as one over the Google limit: only a change of the options helps.
             raise ConfigEntryError(
                 translation_domain=DOMAIN,
@@ -116,7 +120,11 @@ class FlightPricesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             data = await self.app.get_search(self.config_entry.entry_id)
-        except CannotConnect as err:
+        except AppError as err:
+            if err.code == "invalid_auth":
+                raise UpdateFailed(translation_domain=DOMAIN, translation_key="invalid_auth") from err
+            if not isinstance(err, CannotConnect):
+                raise UpdateFailed(str(err)) from err
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="cannot_connect",

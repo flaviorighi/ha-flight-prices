@@ -29,6 +29,20 @@ class Store:
             raise ValueError(f"invalid search id: {search_id!r}")
         return self._root / search_id
 
+    async def ids(self) -> list[str]:
+        """The searches saved, whose config can be read back."""
+
+        def scan() -> list[str]:
+            if not self._root.is_dir():
+                return []
+            return sorted(
+                folder.name
+                for folder in self._root.iterdir()
+                if valid_id(folder.name) and (folder / "config.json").is_file()
+            )
+
+        return await asyncio.to_thread(scan)
+
     async def load_config(self, search_id: str) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._read, self._folder(search_id) / "config.json")
 

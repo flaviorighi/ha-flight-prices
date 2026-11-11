@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import aiohttp
 from aiohttp.test_utils import TestClient
@@ -40,7 +43,12 @@ async def _searched(client: TestClient, search_id: str = "entry1") -> dict[str, 
 async def test_info(client: TestClient) -> None:
     response = await client.get("/api/info")
     assert response.status == 200
-    assert await response.json() == {"version": __version__, "api": 1, "searches": []}
+    assert await response.json() == {
+        "version": __version__,
+        "api": 1,
+        "searches": [],
+        "google": {"limit": 300, "day": 0, "last_24h": 0},
+    }
 
 
 async def test_put_get_delete(client: TestClient, ryanair: Ryanair, tmp_path: Path) -> None:
@@ -136,4 +144,115 @@ async def test_requests(client: TestClient) -> None:
         "high": False,
         "too_many": False,
         "limit": 300,
+        # No other search: the total is this one.
+        "other_day": 0,
+        "total_day": 64,
+        "too_many_total": False,
     }
+
+
+# 8 weeks x 5 destinations x 2 airports x 2 = 160 Google requests a day.
+GOOGLE_160 = {"sources": ["google"], "destinations": ["LIS", "PAR", "LON", "AMS", "BCN"], "weeks": 8}
+
+
+async def test_google_limit_counts_every_search(
+    aiohttp_client: Any, client: TestClient, tmp_path: Path, session: aiohttp.ClientSession, clock: Clock
+) -> None:
+    """Two searches of 160 a day are 320 from the same connection: the second one is refused."""
+    with patch("flight_prices_engine.sources.google.GoogleSource.search", return_value=[]):
+        assert (await client.put("/api/searches/first", json=body(**GOOGLE_160))).status == 200
+        response = await client.put("/api/searches/second", json=body(**GOOGLE_160))
+        assert response.status == 400
+        assert (await response.json())["error"] == "google_too_many_total"
+        # The form sees it before saving, and the search being changed is not counted twice.
+        options = body(**GOOGLE_160)["options"]
+        count = await (await client.post("/api/requests", json={"options": options})).json()
+        assert (count["google_day"], count["other_day"], count["total_day"]) == (160, 160, 320)
+        assert count["too_many_total"] is True and count["high"] is True
+        count = await (await client.post("/api/requests", json={"options": options, "search_id": "first"})).json()
+        assert (count["total_day"], count["too_many_total"]) == (160, False)
+        # Fewer requests always pass, even over the limit.
+        fewer = body(**{**GOOGLE_160, "destinations": ["LIS"]})
+        assert (await client.put("/api/searches/second", json=fewer)).status == 200
+        info = await (await client.get("/api/info")).json()
+        assert info["google"]["day"] == 192
+        await client.app[ENGINE].close()
+
+        # After a restart the saved searches count before their client sends them again,
+        # and a search sent again as it was is never refused.
+        restarted = await aiohttp_client(create_app(await _engine(tmp_path, session, clock)))
+        assert (await (await restarted.get("/api/info")).json())["google"]["day"] == 192
+        assert (await restarted.put("/api/searches/first", json=body(**GOOGLE_160))).status == 200
+        await restarted.app[ENGINE].close()
+
+
+async def _engine(tmp_path: Path, session: aiohttp.ClientSession, clock: Clock) -> Engine:
+    engine = Engine(Store(tmp_path), session, clock)
+    await engine.load()
+    return engine
+
+
+async def test_google_requests_of_the_last_day(client: TestClient, clock: Clock) -> None:
+    with patch("flight_prices_engine.sources.google.GoogleSource.search", return_value=[]):
+        await client.put("/api/searches/entry1", json=body(sources=["google"], destinations=["LIS"]))
+        search = client.app[ENGINE].searches["entry1"]
+        for _ in range(500):
+            if search.states["google"].last_success:
+                break
+            await asyncio.sleep(0.01)
+    # Two airports, two weeks: the outbound found nothing, so no return was searched.
+    assert (await (await client.get("/api/info")).json())["google"]["last_24h"] == 4
+    clock.tick(timedelta(hours=24, minutes=1))
+    assert (await (await client.get("/api/info")).json())["google"]["last_24h"] == 0
+
+
+async def test_list_and_title(client: TestClient) -> None:
+    await client.put("/api/searches/b", json={**body(), "title": "Weekend from Milan"})
+    await client.put("/api/searches/a", json={**body(origins=["TRN"]), "title": "Another"})
+    assert await (await client.get("/api/searches")).json() == [
+        {"id": "a", "title": "Another", "running": True, "google_day": 0},
+        {"id": "b", "title": "Weekend from Milan", "running": True, "google_day": 0},
+    ]
+    # Renaming searches nothing again.
+    search = client.app[ENGINE].searches["b"]
+    await client.put("/api/searches/b", json={**body(), "title": "Renamed"})
+    assert client.app[ENGINE].searches["b"] is search
+    assert (await (await client.get("/api/searches/b")).json())["title"] == "Renamed"
+
+
+async def test_page(client: TestClient) -> None:
+    response = await client.get("/")
+    assert response.status == 200
+    assert response.content_type == "text/html"
+    page = await response.text()
+    assert "<title>Flight Prices</title>" in page
+    # Relative addresses: the page also works behind Home Assistant's ingress.
+    assert "fetch(`api/${path}`" in page
+
+
+@pytest.fixture
+async def locked(
+    aiohttp_client: Any, tmp_path: Path, session: aiohttp.ClientSession, clock: Clock
+) -> AsyncGenerator[TestClient]:
+    yield await aiohttp_client(create_app(Engine(Store(tmp_path), session, clock), password="s3cret"))
+
+
+@pytest.mark.parametrize("path", ["/", "/api/info", "/api/searches"])
+async def test_password(locked: TestClient, path: str) -> None:
+    response = await locked.get(path)
+    assert response.status == 401
+    assert response.headers["WWW-Authenticate"].startswith("Basic")
+    assert (await locked.get(path, headers={"Authorization": "Bearer wrong"})).status == 401
+    # The integration's token, and the browser's login with any user name.
+    assert (await locked.get(path, headers={"Authorization": "Bearer s3cret"})).status == 200
+    basic = base64.b64encode(b"me:s3cret").decode()
+    assert (await locked.get(path, headers={"Authorization": f"Basic {basic}"})).status == 200
+    assert (await locked.get(path, headers={"Authorization": "Basic !!"})).status == 401
+
+
+async def test_ingress_needs_no_password(
+    aiohttp_client: Any, tmp_path: Path, session: aiohttp.ClientSession, clock: Clock
+) -> None:
+    app = create_app(Engine(Store(tmp_path), session, clock), password="s3cret", trusted="127.0.0.1")
+    client = await aiohttp_client(app)
+    assert (await client.get("/api/info")).status == 200

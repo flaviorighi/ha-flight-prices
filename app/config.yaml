@@ -13,9 +13,15 @@ homeassistant: 2026.10.0
 stage: experimental
 discovery:
   - flight_prices
+# The page, in the sidebar: Home Assistant checks who opens it.
+ingress: true
+ingress_port: 8765
+panel_icon: mdi:airplane-takeoff
+panel_title: Flight Prices
 ports:
   8765/tcp: null
 options:
   log_level: info
 schema:
   log_level: list(debug|info|warning|error)
+  password: password?

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 import contextlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 import logging
 import random
@@ -54,6 +54,8 @@ class SearchConfig:
     currency: str
     language: str
     time_zone: str
+    # The name of the search in the client, for the app's page: renaming it searches nothing again.
+    title: str = field(default="", compare=False)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SearchConfig:
@@ -63,6 +65,7 @@ class SearchConfig:
                 currency=str(data["currency"]).upper(),
                 language=str(data["language"]),
                 time_zone=str(data["time_zone"]),
+                title=str(data.get("title") or ""),
             )
             SearchParams.from_options(config.options)
             ZoneInfo(config.time_zone)
@@ -82,6 +85,7 @@ class SearchConfig:
             "currency": self.currency,
             "language": self.language,
             "time_zone": self.time_zone,
+            "title": self.title,
         }
 
 
@@ -95,8 +99,11 @@ class Search:
         store: Store,
         session: aiohttp.ClientSession,
         clock: Callable[[], datetime] = utcnow,
+        on_google_request: Callable[[], None] | None = None,
     ) -> None:
         self.id = search_id
+        # Every request to Google, of any search, counts towards what one connection can make in a day.
+        self._on_google_request = on_google_request
         self.config = config
         self.params = SearchParams.from_options(config.options)
         self._store = store
@@ -267,6 +274,8 @@ class Search:
             if requests:
                 await asyncio.sleep(random.uniform(*const.GOOGLE_DELAY))
             requests += 1
+            if self._on_google_request:
+                self._on_google_request()
             return await asyncio.to_thread(google.search, *args)
 
         try:
@@ -374,6 +383,7 @@ class Search:
         data = self.data()
         return {
             "id": self.id,
+            "title": self.config.title,
             "updated": self.updated.isoformat(),
             "currency": self.config.currency,
             "weeks": [
