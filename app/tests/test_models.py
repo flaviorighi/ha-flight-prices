@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from custom_components.flight_prices.models import (
+from flight_prices_engine.models import (
     Hours,
     Leg,
     SearchParams,

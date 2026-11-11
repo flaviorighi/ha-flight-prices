@@ -1,0 +1,21 @@
+name: Flight Prices
+version: "1.0.0b0"
+slug: flight_prices
+description: Searches the cheapest weekend flights on Ryanair and Google Flights, outside Home Assistant
+url: https://github.com/flaviorighi/ha-flight-prices
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/flaviorighi/flight-prices-app
+startup: application
+boot: auto
+homeassistant: 2026.10.0
+stage: experimental
+discovery:
+  - flight_prices
+ports:
+  8765/tcp: null
+options:
+  log_level: info
+schema:
+  log_level: list(debug|info|warning|error)

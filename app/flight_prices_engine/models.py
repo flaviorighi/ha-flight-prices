@@ -1,4 +1,4 @@
-"""Data shared by the sources, the coordinator and the sensors."""
+"""Data shared by the sources and the searches."""
 
 from __future__ import annotations
 

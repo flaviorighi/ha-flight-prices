@@ -119,7 +119,21 @@ The Google search runs in the background. Its round stops at the first block (co
 
 ## Installation
 
-From the **Marketplace**, which replaced HACS in Home Assistant 2026.11: **Settings → Marketplace → Add from link**, paste `https://github.com/flaviorighi/ha-flight-prices`, install **Flight Prices** and restart Home Assistant. Updates then appear in **Settings** like those of Home Assistant. With HACS, on Home Assistant 2026.10: add this repository as a custom repository (category Integration), install **Flight Prices** and restart. By hand: copy `custom_components/flight_prices` into your `config/custom_components` and restart.
+Flight Prices has two parts: the **app** searches, outside Home Assistant, and the **integration** brings what it finds into Home Assistant as sensors, with the dashboard card. Install the app first.
+
+**The app, on Home Assistant OS**: **Settings → Apps → Install app**, then **⋮ → Repositories**, add `https://github.com/flaviorighi/ha-flight-prices`, install **Flight Prices** and start it. Home Assistant finds it by itself: Flight Prices shows up as discovered in **Settings → Devices & services**.
+
+**The app, with Docker** (Home Assistant in a container, or another machine):
+
+```sh
+docker run -d --name flight-prices --restart unless-stopped   -p 8765:8765 -v flight-prices:/data   ghcr.io/flaviorighi/flight-prices-app:1.0.0b0
+```
+
+The integration then asks for its address, such as `http://192.168.1.10:8765`. Anyone who can reach the port can start searches from your connection: keep it inside your network.
+
+**The integration**, from the **Marketplace**, which replaced HACS in Home Assistant 2026.11: **Settings → Marketplace → Add from link**, paste `https://github.com/flaviorighi/ha-flight-prices`, install **Flight Prices** and restart Home Assistant. Updates then appear in **Settings** like those of Home Assistant. With HACS, on Home Assistant 2026.10: add this repository as a custom repository (category Integration), install **Flight Prices** and restart. By hand: copy `custom_components/flight_prices` into your `config/custom_components` and restart.
+
+**From version 0.x**: the searches you have wait for the app (a repair says so). Once the app runs they move to it by themselves, with what they had found, so nothing is searched again before its time.
 
 Then add the integration in **Settings → Devices & services**. The options can be changed later from the integration's **Configure** button. The **[configuration guide](https://github.com/flaviorighi/ha-flight-prices/blob/main/docs/configuration.md)** explains each option, with images and ready-made setups.
 
@@ -141,9 +155,14 @@ Then add the integration in **Settings → Devices & services**. The options can
 
 ```
 pip install -r requirements_test.txt
-pytest
+pytest                                 # the integration, with the app faked
 ruff check . && ruff format --check .
-node --test "tests/card/*.test.mjs"   # the dashboard card, Node.js 24
+node --test "tests/card/*.test.mjs"    # the dashboard card, Node.js 24
+
+cd app
+pip install -r requirements_test.txt   # in another environment: the app needs no Home Assistant
+pytest                                 # the search engine
+python -m flight_prices_engine --data ./data --port 8765
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.

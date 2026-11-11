@@ -1,0 +1,8 @@
+configuration:
+  log_level:
+    name: Livello del registro
+    description: Quanto scrive l'app nel suo registro. Debug mostra ogni richiesta.
+network:
+  8765/tcp: >-
+    Solo per un Home Assistant su un'altra macchina. Home Assistant su questa macchina raggiunge
+    l'app senza aprirla. Chi raggiunge la porta può avviare ricerche dalla tua connessione.

@@ -1,25 +1,27 @@
-"""Tests for the coordinator and the sensors."""
+"""Tests for the setup, the coordinator and the sensors: the app is faked."""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-import json
+from datetime import timedelta
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import aiohttp
 from freezegun.api import FrozenDateTimeFactory
 import pytest
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from custom_components.flight_prices.models import Hours, Leg
-from custom_components.flight_prices.sources import SourceBlocked, SourceError
-from custom_components.flight_prices.sources.google import GoogleFlight, Place
-from custom_components.flight_prices.sources.ryanair import URL as RYANAIR_URL
+from custom_components.flight_prices import ISSUE_APP_MISSING
+from custom_components.flight_prices.const import DOMAIN
+from homeassistant.components.repairs import DOMAIN as REPAIRS_DOMAIN, repairs_flow_manager
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.setup import async_setup_component
 
-from .conftest import NOW, make_entry, ryanair_payload
+from .conftest import APP, FakeApp, make_entry, result, source_state, trip
+
+NOW = "2026-11-04 10:00:00+00:00"
 
 
 @pytest.fixture(autouse=True)
@@ -28,23 +30,26 @@ def frozen(freezer: FrozenDateTimeFactory) -> FrozenDateTimeFactory:
     return freezer
 
 
-async def _setup(hass: HomeAssistant, **options: Any):
-    entry = make_entry(**options)
+async def _setup(hass: HomeAssistant, entry: MockConfigEntry | None = None, **options: Any) -> MockConfigEntry:
+    entry = entry or make_entry(**options)
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
 
 
-async def test_ryanair_anywhere(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
+async def test_sensors(hass: HomeAssistant, app: FakeApp) -> None:
+    hass.config.currency = "EUR"
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
-    # Two airports, two weeks.
-    assert aioclient_mock.call_count == 4
+
+    # The search, as the app takes it: the options with the currency, language and time zone of the home.
+    sent = app.searches[entry.entry_id]
+    assert sent["options"] == dict(entry.options)
+    assert (sent["currency"], sent["language"], sent["time_zone"]) == ("EUR", "en", hass.config.time_zone)
+    assert "restore" not in sent
 
     week = hass.states.get("sensor.weekend_week_1")
-    assert week is not None
     assert float(week.state) == 131.98
     assert week.attributes["unit_of_measurement"] == "EUR"
     assert week.attributes["outbound_date"] == "2026-11-06"
@@ -52,119 +57,143 @@ async def test_ryanair_anywhere(hass: HomeAssistant, aioclient_mock: Any) -> Non
     assert week.attributes["origins"] == ["MXP", "BGY"]
     assert week.attributes["outbound_hours"] == [19, 24]
     assert week.attributes["return_hours"] == [14, 24]
-    # Both airports answered with the same fixture: one trip per destination is kept.
     assert week.attributes["destinations_found"] == 3
-
     first = week.attributes["trips"][0]
     assert first["city"] == "Varsavia"
-    assert first["outbound"]["departure"] == "2026-11-06T19:00"
     assert first["return"]["flights"] == "FR1904"
 
-    # The fixture is for 6 to 8 November only.
     assert hass.states.get("sensor.weekend_week_2").state == "unknown"
     cheapest = hass.states.get("sensor.weekend_cheapest_trip")
     assert float(cheapest.state) == 131.98
     assert cheapest.attributes["city"] == "Varsavia"
+    assert cheapest.attributes["outbound_date"] == "2026-11-06"
     search = hass.states.get("sensor.weekend_ryanair_search")
     assert search.state == "2026-11-04T10:00:00+00:00"
     assert search.attributes["error"] is None
+    assert search.attributes["trips"] == 3
 
 
-async def test_destinations_found_beyond_the_kept_trips(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    payload = ryanair_payload()
-    fare = payload["fares"][0]
-    fares = []
-    for number in range(12):
-        copy = json.loads(json.dumps(fare))
-        copy["outbound"]["arrivalAirport"]["iataCode"] = f"X{number:02d}"
-        copy["outbound"]["arrivalAirport"]["city"] = {"name": f"City {number}"}
-        copy["summary"]["price"]["value"] = 100 + number
-        fares.append(copy)
-    aioclient_mock.get(RYANAIR_URL, json={**payload, "fares": fares})
-    await _setup(hass)
-    week = hass.states.get("sensor.weekend_week_1")
-    assert week.attributes["destinations_found"] == 12
-    assert len(week.attributes["trips"]) == 12
-
-
-async def test_excluded_countries(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    await _setup(hass, exclude_countries=["IT"])
-    week = hass.states.get("sensor.weekend_week_1")
-    assert [(trip["city"], trip["country_code"]) for trip in week.attributes["trips"]] == [
-        ("Varsavia", "PL"),
-        ("Edimburgo", "GB"),
+async def test_destination_and_google_sensors(hass: HomeAssistant, app: FakeApp) -> None:
+    app.answer = result(ryanair=source_state(), google={**source_state(), "running": True})
+    app.answer["weeks"][0]["trips"].insert(0, trip("LIS", "Lisbona", "PT", 110, "MXP", "google"))
+    await _setup(hass, sources=["ryanair", "google"], google_destinations=["LIS"])
+    lisbon = hass.states.get("sensor.weekend_lis")
+    assert float(lisbon.state) == 110
+    assert lisbon.attributes["city"] == "Lisbona"
+    assert lisbon.attributes["weeks"] == [
+        {
+            "outbound_date": "2026-11-06",
+            "return_date": "2026-11-08",
+            "price": 110,
+            "airline": "Ryanair",
+            "source": "google",
+        }
     ]
-    assert week.attributes["destinations_found"] == 2
+    assert hass.states.get("sensor.weekend_google_flights_search").attributes["running"] is True
 
 
-async def test_saved_results_survive_a_reload(hass: HomeAssistant, aioclient_mock: Any, frozen) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    entry = await _setup(hass)
-    assert aioclient_mock.call_count == 4
-
-    frozen.tick(timedelta(hours=1))
+async def test_results_of_version_0_move_to_the_app(
+    hass: HomeAssistant, app: FakeApp, hass_storage: dict[str, Any]
+) -> None:
+    entry = make_entry()
+    saved = {"sources": {"ryanair": {"fingerprint": "x", "trips": []}}, "names": {}}
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {"version": 1, "key": f"{DOMAIN}.{entry.entry_id}", "data": saved}
+    await _setup(hass, entry)
+    assert app.searches[entry.entry_id]["restore"] == saved
+    # Sent once: the next start sends the search alone.
+    assert f"{DOMAIN}.{entry.entry_id}" not in hass_storage
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    # Not due yet: the saved trips are shown, nothing is searched.
-    assert aioclient_mock.call_count == 4
+    assert "restore" not in app.puts[-1]
+
+
+async def test_app_restarted(hass: HomeAssistant, app: FakeApp, frozen: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass)
+    assert len(app.puts) == 1
+    # The app restarted and does not run the search until it gets it again.
+    app.searches.clear()
+    frozen.tick(timedelta(minutes=1, seconds=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert len(app.puts) == 2
+    assert entry.entry_id in app.searches
     assert float(hass.states.get("sensor.weekend_week_1").state) == 131.98
 
-    # Due after three hours.
-    frozen.tick(timedelta(hours=2, minutes=1))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
-    assert aioclient_mock.call_count == 8
 
-
-async def test_changed_search_searches_again(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    entry = await _setup(hass)
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "outbound_from": 18})
-    await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert aioclient_mock.call_count == 8
-
-
-async def test_more_weeks_search_at_once(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    entry = await _setup(hass)
-    assert aioclient_mock.call_count == 4
-    # Fewer weeks: what was found is enough.
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "weeks": 1})
-    await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert aioclient_mock.call_count == 4
-    # More weeks than the last search covered: two airports, three weeks, at once.
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "weeks": 3})
-    await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert aioclient_mock.call_count == 10
-    assert hass.states.get("sensor.weekend_week_3") is not None
-
-
-async def test_ryanair_failure_keeps_old_trips(hass: HomeAssistant, aioclient_mock: Any, frozen) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    await _setup(hass)
-    aioclient_mock.clear_requests()
-    aioclient_mock.get(RYANAIR_URL, status=500)
-    frozen.tick(timedelta(hours=3, minutes=1))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
-    assert float(hass.states.get("sensor.weekend_week_1").state) == 131.98
-    search = hass.states.get("sensor.weekend_ryanair_search")
-    assert search.state == "2026-11-04T10:00:00+00:00"
-    assert "500" in search.attributes["error"]
-
-
-async def test_setup_retries_when_nothing_answers(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, status=500)
+async def test_app_offline(hass: HomeAssistant, app: FakeApp, frozen: FrozenDateTimeFactory) -> None:
+    app.online = False
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
+    app.online = True
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    # Stopped later: the sensors are unavailable until it answers again.
+    app.online = False
+    frozen.tick(timedelta(minutes=1, seconds=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.weekend_week_1").state == "unavailable"
 
-async def test_fewer_weeks_remove_entities(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
+
+async def test_search_refused(hass: HomeAssistant, app: FakeApp) -> None:
+    app.refuse = "google_too_many"
+    entry = await _setup(hass)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_every_source_failing(hass: HomeAssistant, app: FakeApp, frozen: FrozenDateTimeFactory) -> None:
+    await _setup(hass)
+    app.answer = result(ryanair=source_state(last_success=None, error="HTTP 500"))
+    app.answer["weeks"][0]["trips"] = []
+    frozen.tick(timedelta(minutes=1, seconds=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.weekend_week_1").state == "unavailable"
+
+
+async def test_version_1_without_app(hass: HomeAssistant, app: FakeApp) -> None:
+    """A search of version 0 waits for the app; the repair asks where it is and connects it."""
+    assert await async_setup_component(hass, REPAIRS_DOMAIN, {})
+    entry = await _setup(hass, make_entry(version=1, url=None))
+    assert entry.version == 2
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_MISSING)
+    assert issue is not None and issue.is_fixable
+
+    app.mock.get("http://nowhere.test:1/api/info", exc=aiohttp.ClientConnectionError("refused"))
+    flows = repairs_flow_manager(hass)
+    flow = await flows.async_init(DOMAIN, data={"issue_id": ISSUE_APP_MISSING})
+    assert flow["step_id"] == "app"
+    flow = await flows.async_configure(flow["flow_id"], {"url": "http://nowhere.test:1"})
+    assert flow["errors"] == {"base": "cannot_connect"}
+    flow = await flows.async_configure(flow["flow_id"], {"url": f"{APP}/"})
+    assert flow["type"] == "create_entry"
+    await hass.async_block_till_done()
+
+    assert entry.data == {"url": APP}
+    assert entry.state is ConfigEntryState.LOADED
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_MISSING) is None
+
+
+async def test_version_1_with_the_app_known(hass: HomeAssistant, app: FakeApp) -> None:
+    await _setup(hass)
+    old = make_entry(version=1, url=None, origins=["TRN"])
+    await _setup(hass, old)
+    # Another search already knows where the app is.
+    assert old.data == {"url": APP}
+    assert old.state is ConfigEntryState.LOADED
+
+
+async def test_remove_deletes_the_search(hass: HomeAssistant, app: FakeApp) -> None:
+    entry = await _setup(hass)
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert app.deleted == [entry.entry_id]
+
+
+async def test_fewer_weeks_remove_entities(hass: HomeAssistant, app: FakeApp) -> None:
     entry = await _setup(hass)
     hass.config_entries.async_update_entry(entry, options={**entry.options, "weeks": 1})
     await hass.config_entries.async_reload(entry.entry_id)
@@ -174,179 +203,7 @@ async def test_fewer_weeks_remove_entities(hass: HomeAssistant, aioclient_mock: 
     assert registry.async_get_entity_id("sensor", "flight_prices", f"{entry.entry_id}_week_1") is not None
 
 
-def _flight(
-    origin: str,
-    destination: str,
-    day: date,
-    hour: int,
-    price: float,
-    number: str,
-    airline: str = "easyJet",
-    place: Place | None = None,
-) -> GoogleFlight:
-    departure = datetime(day.year, day.month, day.day, hour, 0)
-    return GoogleFlight(
-        Leg(
-            origin=origin,
-            destination=destination,
-            departure=departure,
-            arrival=departure + timedelta(hours=2),
-            flight_numbers=(number,),
-            airline=airline,
-        ),
-        price,
-        place=place,
-    )
-
-
-def _fake_google(blocked_after: int | None = None, failing: set[int] | None = None):
-    calls: list[tuple] = []
-
-    def search(day: date, origin: str, destination: str, hours: Hours, direct_only: bool) -> list[GoogleFlight]:
-        calls.append((day, origin, destination))
-        if blocked_after is not None and len(calls) > blocked_after:
-            raise SourceBlocked("Google Flights asked to solve a captcha")
-        if failing and len(calls) in failing:
-            raise SourceError("timeout")
-        if day.weekday() == 4:
-            return [_flight(origin, destination, day, 20, 50 if origin == "MXP" else 70, "U21")]
-        return [_flight(origin, destination, day, 18, 60, "U22")]
-
-    return calls, search
-
-
-async def test_google_round(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    calls, search = _fake_google()
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["google"], destinations=["LIS"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    # Two weeks, one destination, two airports, outbound and return.
-    assert len(calls) == 8
-    week = hass.states.get("sensor.weekend_week_1")
-    assert float(week.state) == 110
-    trip = week.attributes["trips"][0]
-    assert (trip["origin"], trip["source"], trip["link"]) == ("MXP", "google", "https://g")
-    assert float(hass.states.get("sensor.weekend_lis").state) == 110
-    assert hass.states.get("sensor.weekend_google_flights_search").attributes["running"] is False
-    assert aioclient_mock.call_count == 0
-
-
-async def test_google_block_stops_the_round(hass: HomeAssistant) -> None:
-    calls, search = _fake_google(blocked_after=2)
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["google"], destinations=["LIS"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    assert len(calls) == 3
-    # What came before the block is kept.
-    assert float(hass.states.get("sensor.weekend_week_1").state) == 110
-    search_state = hass.states.get("sensor.weekend_google_flights_search")
-    assert search_state.state == "unknown"
-    assert "captcha" in search_state.attributes["error"]
-
-
-async def test_google_single_error_goes_on(hass: HomeAssistant) -> None:
-    calls, search = _fake_google(failing={1})
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["google"], destinations=["LIS"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    # The first outbound failed, so its return was not searched.
-    assert len(calls) == 7
-    week = hass.states.get("sensor.weekend_week_1")
-    # Only BGY is left for the first week.
-    assert float(week.state) == 130
-    assert hass.states.get("sensor.weekend_google_flights_search").state == "2026-11-04T10:00:00+00:00"
-
-
-async def test_google_takes_names_from_ryanair(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    _calls, search = _fake_google()
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["ryanair", "google"], destinations=["PMO", "WWA"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    week = hass.states.get("sensor.weekend_week_1")
-    # Google is cheaper everywhere: 50 + 60 from MXP, 70 + 60 from BGY.
-    assert [
-        (trip["destination"], trip["origin"], trip["city"], trip["country_code"], trip["source"])
-        for trip in week.attributes["trips"]
-    ] == [
-        ("PMO", "MXP", "Palermo", "IT", "google"),
-        ("WWA", "MXP", "Varsavia", "PL", "google"),
-        ("PMO", "BGY", "Palermo", "IT", "google"),
-        ("WWA", "BGY", "Varsavia", "PL", "google"),
-    ]
-    assert hass.states.get("sensor.weekend_pmo").attributes["city"] == "Palermo"
-
-
-async def test_google_two_airlines_two_tickets(hass: HomeAssistant) -> None:
-    def search(day: date, origin: str, destination: str, hours: Hours, direct_only: bool) -> list[GoogleFlight]:
-        if day.weekday() == 4:
-            return [_flight(origin, destination, day, 20, 40, "FR1", "Ryanair", Place("Londra", "Regno Unito", "GB"))]
-        # Back with another airline in the first week, with the same one in the second.
-        airline = "Wizz Air" if day.day == 8 else "Ryanair"
-        return [_flight(origin, destination, day, 18, 60, "W1", airline, Place("Milano", "Italia", "IT"))]
-
-    def link(legs: list[tuple], direct_only: bool) -> str:
-        return " ".join(f"{day.day}:{origin}-{destination}" for day, origin, destination, _hours in legs)
-
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", side_effect=link),
-    ):
-        await _setup(hass, sources=["google"], origins=["MXP"], destinations=["LON"], exclude_countries=["IT"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    first = hass.states.get("sensor.weekend_week_1").attributes["trips"][0]
-    assert (first["link"], first["return_link"]) == ("6:MXP-LON", "8:LON-MXP")
-    # City and country from Google's page, so the countries left out apply to Google's trips too.
-    assert (first["city"], first["country"], first["country_code"]) == ("Londra", "Regno Unito", "GB")
-    second = hass.states.get("sensor.weekend_week_2").attributes["trips"][0]
-    assert (second["link"], second["return_link"]) == ("13:MXP-LON 15:LON-MXP", None)
-
-
-async def test_google_from_some_airports(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    calls, search = _fake_google()
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["ryanair", "google"], destinations=["PMO"], google_origins=["MXP"])
-        await hass.async_block_till_done(wait_background_tasks=True)
-    # Ryanair from both airports, Google from Malpensa only: two weeks, outbound and return.
-    assert aioclient_mock.call_count == 4
-    assert {call[1] for call in calls} == {"MXP", "PMO"}
-    assert len(calls) == 4
-
-
-async def test_ryanair_anywhere_google_list(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    calls, search = _fake_google()
-    with (
-        patch("custom_components.flight_prices.sources.google.GoogleSource.search", side_effect=search),
-        patch("custom_components.flight_prices.sources.google.GoogleSource.link", return_value="https://g"),
-    ):
-        await _setup(hass, sources=["ryanair", "google"], google_origins=["MXP"], google_destinations=["HAM"], weeks=1)
-        await hass.async_block_till_done(wait_background_tasks=True)
-    assert {call[2] for call in calls} == {"HAM", "MXP"}
-    trips = hass.states.get("sensor.weekend_week_1").attributes["trips"]
-    # Ryanair still everywhere, Google adds Hamburg.
-    assert [trip["destination"] for trip in trips] == ["HAM", "WWA", "PMO", "EDI"]
-    assert hass.states.get("sensor.weekend_ham") is not None
-
-
-async def test_card_is_served(hass: HomeAssistant, aioclient_mock: Any, frontend: MagicMock) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
+async def test_card_is_served(hass: HomeAssistant, app: FakeApp, frontend: MagicMock) -> None:
     await _setup(hass)
     paths = hass.http.async_register_static_paths.call_args.args[0]
     assert [(path.url_path, path.path.endswith("frontend/flight-prices-card.js")) for path in paths] == [
@@ -356,3 +213,12 @@ async def test_card_is_served(hass: HomeAssistant, aioclient_mock: Any, frontend
     url = frontend.call_args.args[1]
     assert url.startswith("/flight_prices/flight-prices-card.js?v=")
     assert len(url.split("v=")[1]) == 8
+
+
+async def test_removing_the_search_without_app_removes_the_repair(hass: HomeAssistant, app: FakeApp) -> None:
+    entry = await _setup(hass, make_entry(version=1, url=None))
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_MISSING) is not None
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_MISSING) is None
+    assert app.deleted == []

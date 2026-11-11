@@ -50,6 +50,30 @@
           "save": "Save",
           "change": "Change the search"
         }
+      },
+      "app": {
+        "title": "Flight Prices app",
+        "description": "The searches run in the Flight Prices app. On Home Assistant OS, install it from the app store ([how]({app_url})) and Home Assistant finds it by itself. With Docker, start its container and enter its address here.",
+        "data": {
+          "url": "App address"
+        },
+        "data_description": {
+          "url": "For example `http://192.168.1.10:8765`."
+        }
+      },
+      "hassio_confirm": {
+        "title": "Flight Prices app found",
+        "description": "The Flight Prices app is running. Set up a first search?"
+      },
+      "reconfigure": {
+        "title": "App address",
+        "description": "Every search that uses this app moves to the new address.",
+        "data": {
+          "url": "App address"
+        },
+        "data_description": {
+          "url": "For example `http://192.168.1.10:8765`."
+        }
       }
     },
     "error": {
@@ -59,10 +83,15 @@
       "google_needs_destinations": "Google Flights needs destinations: fill in its own or the destinations above.",
       "invalid_hours": "The end must come after the start.",
       "invalid_country": "Use two-letter ISO country codes, such as IT.",
-      "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval."
+      "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval.",
+      "cannot_connect": "The app does not answer at this address. Is it started?",
+      "incompatible": "The app and the integration have different versions: update both to the latest release."
     },
     "abort": {
-      "already_configured": "This search already exists."
+      "already_configured": "This search already exists.",
+      "app_connected": "The Flight Prices app is connected: the searches run there from now on.",
+      "cannot_connect": "The Flight Prices app does not answer.",
+      "reconfigure_successful": "The searches now use the app at the new address."
     }
   },
   "options": {
@@ -127,7 +156,11 @@
       "google_needs_destinations": "Google Flights needs destinations: fill in its own or the destinations above.",
       "invalid_hours": "The end must come after the start.",
       "invalid_country": "Use two-letter ISO country codes, such as IT.",
-      "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval."
+      "google_too_many": "Google Flights would make up to {count} requests a day, more than the {limit} that keep your home connection safe from a block: use fewer Google destinations, departure airports or weeks, or a longer interval.",
+      "cannot_connect": "The app does not answer at this address. Is it started?"
+    },
+    "abort": {
+      "app_missing": "This search needs the Flight Prices app: install it ([how]({app_url})) and fix the issue in Repairs."
     }
   },
   "selector": {
@@ -171,6 +204,38 @@
   "exceptions": {
     "update_failed": {
       "message": "No source answered: {error}"
+    },
+    "cannot_connect": {
+      "message": "The Flight Prices app does not answer: {error}"
+    },
+    "search_refused": {
+      "message": "The Flight Prices app refused the search: {error}. Change it from Configure."
+    },
+    "app_missing": {
+      "message": "The Flight Prices app is missing: see Repairs."
+    }
+  },
+  "issues": {
+    "app_missing": {
+      "title": "Flight Prices needs its app",
+      "fix_flow": {
+        "step": {
+          "app": {
+            "title": "Flight Prices needs its app",
+            "description": "From version 1.0 the searches run in the Flight Prices app, outside Home Assistant. Install the app ([how]({app_url})): on Home Assistant OS it is found by itself and your searches move to it, keeping what they found. With Docker, start its container and enter its address here.",
+            "data": {
+              "url": "App address"
+            },
+            "data_description": {
+              "url": "For example `http://192.168.1.10:8765`."
+            }
+          }
+        },
+        "error": {
+          "cannot_connect": "The app does not answer at this address. Is it started?",
+          "incompatible": "The app and the integration have different versions: update both to the latest release."
+        }
+      }
     }
   }
 }

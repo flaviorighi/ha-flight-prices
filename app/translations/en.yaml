@@ -1,0 +1,8 @@
+configuration:
+  log_level:
+    name: Log level
+    description: How much the app writes in its log. Debug shows every request.
+network:
+  8765/tcp: >-
+    Only for a Home Assistant on another machine. Home Assistant on this machine reaches the app
+    without it. Anyone who can reach the port can start searches from your connection.

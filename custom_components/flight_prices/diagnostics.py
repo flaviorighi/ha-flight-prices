@@ -6,32 +6,29 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .api import AppError
 from .coordinator import FlightPricesConfigEntry
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: FlightPricesConfigEntry) -> dict[str, Any]:
-    """The search, the state of each source and how many trips each week has. Nothing personal is stored."""
+    """The search, the app, the state of each source and how many trips each week has. Nothing personal is stored."""
     coordinator = entry.runtime_data
     data = coordinator.data
+    try:
+        app: dict[str, Any] = await coordinator.app.info()
+    except AppError as err:
+        app = {"error": str(err)}
     return {
         "options": dict(entry.options),
-        "google_running": coordinator.google_running,
-        "sources": {
-            name: {
-                "last_attempt": state.last_attempt.isoformat() if state.last_attempt else None,
-                "last_success": state.last_success.isoformat() if state.last_success else None,
-                "error": state.error,
-                "trips": len(state.trips),
-            }
-            for name, state in data.sources.items()
-        },
+        "app": {"url": coordinator.app.url, **{key: app.get(key) for key in ("version", "api", "error")}},
+        "sources": data["sources"],
         "weeks": [
             {
-                "outbound": result.week.outbound.isoformat(),
-                "inbound": result.week.inbound.isoformat(),
-                "trips": len(result.trips),
-                "cheapest": result.trips[0].price if result.trips else None,
+                "outbound": week["outbound_date"],
+                "inbound": week["return_date"],
+                "trips": len(week["trips"]),
+                "cheapest": week["trips"][0]["price"] if week["trips"] else None,
             }
-            for result in data.weeks
+            for week in data["weeks"]
         ],
     }

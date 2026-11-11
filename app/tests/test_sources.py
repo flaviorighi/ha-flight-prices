@@ -8,28 +8,27 @@ import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import aiohttp
 import pytest
 from yarl import URL
 
-from custom_components.flight_prices.models import Hours
-from custom_components.flight_prices.sources import SourceBlocked, SourceError
-from custom_components.flight_prices.sources.google import GoogleSource, Place, city_from_airport, parse_page
-from custom_components.flight_prices.sources.ryanair import URL as RYANAIR_URL, RyanairSource
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from flight_prices_engine.models import Hours
+from flight_prices_engine.sources import SourceBlocked, SourceError
+from flight_prices_engine.sources.google import GoogleSource, Place, city_from_airport, parse_page
+from flight_prices_engine.sources.ryanair import RyanairSource
 
-from .conftest import ryanair_payload
+from .conftest import Ryanair, ryanair_payload
 
 OUT, BACK = date(2026, 11, 6), date(2026, 11, 8)
 EVENING, AFTERNOON = Hours(19, 24), Hours(14, 24)
 
 
-async def test_ryanair_anywhere(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    source = RyanairSource(async_get_clientsession(hass), "EUR", "it-IT")
+async def test_ryanair_anywhere(session: aiohttp.ClientSession, ryanair: Ryanair) -> None:
+    ryanair.answer(ryanair_payload())
+    source = RyanairSource(session, "EUR", "it-IT")
     trips = await source.search("BGY", OUT, BACK, EVENING, AFTERNOON)
 
-    url: URL = aioclient_mock.mock_calls[0][1]
+    url: URL = ryanair.calls[0]
     assert dict(url.query) == {
         "departureAirportIataCode": "BGY",
         "outboundDepartureDateFrom": "2026-11-06",
@@ -57,18 +56,20 @@ async def test_ryanair_anywhere(hass: HomeAssistant, aioclient_mock: Any) -> Non
     assert "originIata=BGY&destinationIata=WMI" in warsaw.link
 
 
-async def test_ryanair_list_matches_airport_or_city(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    aioclient_mock.get(RYANAIR_URL, json=ryanair_payload())
-    source = RyanairSource(async_get_clientsession(hass), "EUR", "en")
+async def test_ryanair_list_matches_airport_or_city(session: aiohttp.ClientSession, ryanair: Ryanair) -> None:
+    ryanair.answer(ryanair_payload())
+    source = RyanairSource(session, "EUR", "en")
     trips = await source.search("BGY", OUT, BACK, EVENING, AFTERNOON, ["wwa", "PMO", "LIS"])
     assert [trip.destination for trip in trips] == ["WWA", "PMO"]
     assert "/gb/en/" in trips[0].link
 
 
 @pytest.mark.parametrize(("status", "error"), [(429, SourceBlocked), (403, SourceBlocked), (500, SourceError)])
-async def test_ryanair_errors(hass: HomeAssistant, aioclient_mock: Any, status: int, error: type[Exception]) -> None:
-    aioclient_mock.get(RYANAIR_URL, status=status)
-    source = RyanairSource(async_get_clientsession(hass), "EUR", "it")
+async def test_ryanair_errors(
+    session: aiohttp.ClientSession, ryanair: Ryanair, status: int, error: type[Exception]
+) -> None:
+    ryanair.answer(status=status)
+    source = RyanairSource(session, "EUR", "it")
     with pytest.raises(error):
         await source.search("BGY", OUT, BACK, EVENING, AFTERNOON)
 
@@ -195,7 +196,7 @@ def test_google_search_keeps_the_hours(direct_only: bool) -> None:
 def test_google_refusals(status: int, location: str, error: type[Exception]) -> None:
     source = GoogleSource("EUR", "it")
     response = MagicMock(status_code=status, headers={"location": location}, text="")
-    with patch("custom_components.flight_prices.sources.google.Client") as client, pytest.raises(error):
+    with patch("flight_prices_engine.sources.google.Client") as client, pytest.raises(error):
         client.return_value.get.return_value = response
         source.search(OUT, "MXP", "LIS", EVENING, True)
     # The consent cookies go with every request.
@@ -223,7 +224,7 @@ def test_google_link() -> None:
     # The hours and the stops go into the search, as in the searches that found the trip.
     assert _search(source.link([(OUT, "MXP", "LIS", Hours(0, 24))], True)) != one
     assert _search(source.link([there], False)) != one
-    with patch("custom_components.flight_prices.sources.google.create_query") as create:
+    with patch("flight_prices_engine.sources.google.create_query") as create:
         source.link([there, back], True)
     kwargs = create.call_args.kwargs
     assert kwargs["trip"] == "round-trip"

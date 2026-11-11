@@ -3,11 +3,11 @@
   "name": "Flight Prices",
   "codeowners": ["@flaviorighi"],
   "config_flow": true,
-  "dependencies": ["frontend", "http"],
+  "dependencies": ["frontend", "http", "repairs"],
   "documentation": "https://github.com/flaviorighi/ha-flight-prices",
   "integration_type": "service",
-  "iot_class": "cloud_polling",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/flaviorighi/ha-flight-prices/issues",
-  "requirements": ["fast-flights==3.1.0", "primp==2.0.1", "selectolax==1.0.2"],
-  "version": "0.1.1"
+  "requirements": [],
+  "version": "1.0.0b0"
 }

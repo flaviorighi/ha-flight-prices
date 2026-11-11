@@ -46,26 +46,22 @@ DEFAULT_RETURN_TO: Final = 24
 DEFAULT_DIRECT_ONLY: Final = True
 DEFAULT_RYANAIR_HOURS: Final = 3
 DEFAULT_GOOGLE_HOURS: Final = 24
-# Google Flights has no published limit: too many automatic searches get the home's IP address a
-# captcha. These limits are ours, kept well above what has run for weeks without a block (224
-# requests a day, 20 to 30 seconds apart) and well below anything aggressive.
+# Google Flights has no published limit: the app refuses more than its limit a day, and an
+# interval under this one. The field of the interval does not go lower.
 GOOGLE_MIN_HOURS: Final = 12
-GOOGLE_MAX_REQUESTS_PER_DAY: Final = 300
-# From here the summary before saving warns that the search is close to the limit.
-GOOGLE_HIGH_REQUESTS_PER_DAY: Final = 200
 
-# How often the coordinator checks whether a source is due.
-TICK: Final = timedelta(minutes=15)
+# The searches run in the app: the integration asks it for what they found this often.
+UPDATE_INTERVAL: Final = timedelta(minutes=1)
+# Where the app is: http://<host>:<port>, from the Supervisor's discovery or typed in.
+CONF_URL: Final = "url"
+DEFAULT_URL: Final = "http://localhost:8765"
+# The version of the app's API this integration speaks.
+API_VERSION: Final = 1
+# Installing the app, linked from the forms and the repair.
+APP_URL: Final = "https://github.com/flaviorighi/ha-flight-prices#installation"
 
-# Ryanair answers in a fraction of a second; a short pause keeps the requests polite.
-RYANAIR_DELAY: Final = 1.0
-# Google Flights is read without an API: the requests are spread out, so a search of
-# 160 pages takes about an hour, and a block stops it at once.
-GOOGLE_DELAY: Final = (20.0, 30.0)
-
-# Trips kept per week, at most one per destination and departure airport.
-TRIPS_PER_WEEK: Final = 40
 # Trips in the attributes of a week sensor, cheapest first.
 TRIPS_IN_ATTRIBUTES: Final = 30
 
-STORAGE_VERSION: Final = 1
+# What the integration saved before the app existed, sent to the app once.
+LEGACY_STORAGE_VERSION: Final = 1

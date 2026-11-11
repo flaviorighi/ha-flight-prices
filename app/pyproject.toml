@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flight-prices-engine"
+description = "The search engine of Flight Prices for Home Assistant: weekend flights from Ryanair and Google Flights"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+dynamic = ["version"]
+# Pinned in requirements.txt, which the image installs.
+dependencies = [
+    "aiohttp>=3.13",
+    "fast-flights>=3.1",
+    "primp>=2.0",
+    "selectolax>=1.0",
+    # fast-flights uses it without declaring it.
+    "typing_extensions>=4.12",
+]
+
+[project.scripts]
+flight-prices-engine = "flight_prices_engine.__main__:run"
+
+[tool.setuptools.dynamic]
+version = { attr = "flight_prices_engine.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["flight_prices_engine*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]

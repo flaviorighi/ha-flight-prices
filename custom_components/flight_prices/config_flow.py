@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 import re
 from typing import Any
 
@@ -11,7 +10,8 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlowWithReload
 from homeassistant.const import CONF_NAME
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -22,9 +22,14 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
+    TextSelectorType,
 )
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
+from . import connect_entries
+from .api import AppError, FlightPricesApp, Incompatible
 from .const import (
+    APP_URL,
     CONF_DESTINATIONS,
     CONF_DIRECT_ONLY,
     CONF_EXCLUDE_COUNTRIES,
@@ -40,6 +45,7 @@ from .const import (
     CONF_RETURN_TO,
     CONF_RYANAIR_INTERVAL,
     CONF_SOURCES,
+    CONF_URL,
     CONF_WEEKS,
     DEFAULT_DIRECT_ONLY,
     DEFAULT_GOOGLE_HOURS,
@@ -50,11 +56,9 @@ from .const import (
     DEFAULT_RETURN_FROM,
     DEFAULT_RETURN_TO,
     DEFAULT_RYANAIR_HOURS,
+    DEFAULT_URL,
     DEFAULT_WEEKS,
     DOMAIN,
-    GOOGLE_DELAY,
-    GOOGLE_HIGH_REQUESTS_PER_DAY,
-    GOOGLE_MAX_REQUESTS_PER_DAY,
     GOOGLE_MIN_HOURS,
     GUIDE_URL,
     MAX_WEEKS,
@@ -104,6 +108,7 @@ SEARCH_SCHEMA = vol.Schema(
         vol.Required(CONF_DIRECT_ONLY, default=DEFAULT_DIRECT_ONLY): BooleanSelector(),
     }
 )
+APP_SCHEMA = vol.Schema({vol.Required(CONF_URL): TextSelector(TextSelectorConfig(type=TextSelectorType.URL))})
 USER_SCHEMA = vol.Schema({vol.Required(CONF_NAME): TextSelector()}).extend(SEARCH_SCHEMA.schema)
 OPTIONS_SCHEMA = SEARCH_SCHEMA.extend(
     {
@@ -120,64 +125,30 @@ def _codes(values: Any) -> list[str]:
     return list(dict.fromkeys(code.strip().upper() for code in values or () if code.strip()))
 
 
-@dataclass(frozen=True)
-class Requests:
-    """The most requests a search makes: Google skips the return when the outbound found nothing."""
-
-    google_round: int
-    google_hours: int
-    ryanair_round: int
-    ryanair_hours: int
-
-    @property
-    def google_day(self) -> int:
-        return -(-self.google_round * 24 // self.google_hours) if self.google_round else 0
-
-    @property
-    def google_minutes(self) -> int:
-        """A round, at the average pause between two requests."""
-        return round(self.google_round * sum(GOOGLE_DELAY) / 2 / 60)
-
-    @property
-    def high(self) -> bool:
-        return self.google_day >= GOOGLE_HIGH_REQUESTS_PER_DAY
+async def count(app: FlightPricesApp, options: Mapping[str, Any]) -> tuple[dict[str, Any] | None, dict[str, str]]:
+    """What the app counts for these options, and the errors to show."""
+    try:
+        requests = await app.count_requests(dict(options))
+    except AppError:
+        return None, {"base": "cannot_connect"}
+    if requests["too_many"]:
+        # Many requests from one address get it a captcha from Google, for the whole home.
+        return requests, {CONF_GOOGLE_DESTINATIONS: "google_too_many"}
+    return requests, {}
 
 
-def count_requests(options: Mapping[str, Any]) -> Requests:
-    """Per round: Google weeks x destinations x airports x 2 (out and back), Ryanair airports x weeks."""
-    sources = options.get(CONF_SOURCES, ())
-    weeks = int(options.get(CONF_WEEKS, DEFAULT_WEEKS))
-    google_round = 0
-    if SOURCE_GOOGLE in sources:
-        destinations = options.get(CONF_GOOGLE_DESTINATIONS) or options.get(CONF_DESTINATIONS) or ()
-        origins = options.get(CONF_GOOGLE_ORIGINS) or options.get(CONF_ORIGINS) or ()
-        google_round = weeks * len(destinations) * len(origins) * 2
-    return Requests(
-        google_round=google_round,
-        google_hours=max(int(options.get(CONF_GOOGLE_INTERVAL, DEFAULT_GOOGLE_HOURS)), GOOGLE_MIN_HOURS),
-        ryanair_round=weeks * len(options.get(CONF_ORIGINS, ())) if SOURCE_RYANAIR in sources else 0,
-        ryanair_hours=int(options.get(CONF_RYANAIR_INTERVAL, DEFAULT_RYANAIR_HOURS)),
-    )
-
-
-def placeholders(options: Mapping[str, Any]) -> dict[str, str]:
+def placeholders(requests: Mapping[str, Any] | None) -> dict[str, str]:
     """For the texts of the forms: the guide, the limit and what the search makes."""
-    requests = count_requests(options)
-    return {
-        "guide_url": GUIDE_URL,
-        "limit": str(GOOGLE_MAX_REQUESTS_PER_DAY),
-        "count": str(requests.google_day),
-        "google_round": str(requests.google_round),
-        "google_day": str(requests.google_day),
-        "google_minutes": str(requests.google_minutes),
-        "google_hours": str(requests.google_hours),
-        "ryanair_round": str(requests.ryanair_round),
-        "ryanair_hours": str(requests.ryanair_hours),
-    }
+    values = {"guide_url": GUIDE_URL, "app_url": APP_URL}
+    keys = ("limit", "google_round", "google_day", "google_minutes", "google_hours", "ryanair_round", "ryanair_hours")
+    # Without an answer from the app the numbers are unknown; an error says why.
+    values |= {key: str(requests[key]) if requests else "…" for key in keys}
+    values["count"] = values["google_day"]
+    return values
 
 
 def validate(user_input: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """The options to store, and the errors to show."""
+    """The options to store, and the errors to show; the app counts the requests."""
     errors: dict[str, str] = {}
     origins = _codes(user_input.get(CONF_ORIGINS))
     destinations = _codes(user_input.get(CONF_DESTINATIONS))
@@ -222,13 +193,10 @@ def validate(user_input: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, s
         errors[CONF_OUTBOUND_TO] = "invalid_hours"
     if options[CONF_RETURN_FROM] >= options[CONF_RETURN_TO]:
         errors[CONF_RETURN_TO] = "invalid_hours"
+    # The interval cannot go under GOOGLE_MIN_HOURS: its field does not accept it.
     for key in (CONF_RYANAIR_INTERVAL, CONF_GOOGLE_INTERVAL):
         if key in user_input:
             options[key] = int(user_input[key])
-    # The interval cannot go under GOOGLE_MIN_HOURS: its field does not accept it.
-    if count_requests(options).google_day > GOOGLE_MAX_REQUESTS_PER_DAY:
-        # Many requests from one address get it a captcha from Google, for the whole home.
-        errors.setdefault(CONF_GOOGLE_DESTINATIONS, "google_too_many")
     return options, errors
 
 
@@ -241,10 +209,28 @@ def _suggested(options: Mapping[str, Any]) -> dict[str, Any]:
     return values
 
 
-class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
-    """One entry per search: from where, to where, on which days."""
+async def check_app(hass: HomeAssistant, url: str) -> dict[str, str]:
+    """The errors of an address that is not a Flight Prices app this integration can talk to."""
+    try:
+        await FlightPricesApp(async_get_clientsession(hass), url).info()
+    except Incompatible:
+        return {"base": "incompatible"}
+    except AppError:
+        return {"base": "cannot_connect"}
+    return {}
 
-    VERSION = 1
+
+def known_url(hass: HomeAssistant) -> str | None:
+    """The app the other searches use: one app runs every search."""
+    return next(
+        (entry.data[CONF_URL] for entry in hass.config_entries.async_entries(DOMAIN) if CONF_URL in entry.data), None
+    )
+
+
+class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
+    """One entry per search: from where, to where, on which days. The app runs them all."""
+
+    VERSION = 2
 
     @staticmethod
     @callback
@@ -255,34 +241,89 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         super().__init__()
         self._name = ""
         self._options: dict[str, Any] = {}
+        self._requests: dict[str, Any] | None = None
+        self._url: str | None = None
+
+    def _app(self) -> FlightPricesApp:
+        assert self._url is not None
+        return FlightPricesApp(async_get_clientsession(self.hass), self._url)
+
+    async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
+        """The app announced itself: connect the searches waiting for it, or offer a first search."""
+        url = f"http://{discovery_info.config['host']}:{discovery_info.config['port']}"
+        # One flow for the app, however many times it starts.
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
+        if await check_app(self.hass, url):
+            return self.async_abort(reason="cannot_connect")
+        if connect_entries(self.hass, url):
+            return self.async_abort(reason="app_connected")
+        if self.hass.config_entries.async_entries(DOMAIN):
+            # Searches already connected, to this app or to another one by choice.
+            return self.async_abort(reason="already_configured")
+        self._url = url
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            # The search's entry gets no id: more searches can follow from the add button.
+            await self.async_set_unique_id(None)
+            return await self.async_step_user()
+        return self.async_show_form(step_id="hassio_confirm", description_placeholders={"app_url": APP_URL})
+
+    async def async_step_app(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Where the app is, when Home Assistant did not find it: Docker, or another machine."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            url = user_input[CONF_URL].strip().rstrip("/")
+            if not (errors := await check_app(self.hass, url)):
+                self._url = url
+                return await self.async_step_user()
+        return self.async_show_form(
+            step_id="app",
+            data_schema=self.add_suggested_values_to_schema(APP_SCHEMA, user_input or {CONF_URL: DEFAULT_URL}),
+            errors=errors,
+            description_placeholders={"app_url": APP_URL},
+        )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if self._url is None:
+            if (url := known_url(self.hass)) is None:
+                return await self.async_step_app()
+            self._url = url
         errors: dict[str, str] = {}
         options: dict[str, Any] = {}
         if user_input is not None:
             options, errors = validate(user_input)
             if not errors:
-                self._async_abort_entries_match(
-                    {key: options[key] for key in (CONF_ORIGINS, CONF_DESTINATIONS, CONF_OUTBOUND_DAY, CONF_RETURN_DAY)}
-                )
-                self._name, self._options = user_input[CONF_NAME].strip(), options
-                if count_requests(options).google_round:
-                    return self._summary()
-                return await self.async_step_save()
+                requests, errors = await count(self._app(), options)
+                if not errors:
+                    self._async_abort_entries_match(
+                        {
+                            key: options[key]
+                            for key in (CONF_ORIGINS, CONF_DESTINATIONS, CONF_OUTBOUND_DAY, CONF_RETURN_DAY)
+                        }
+                    )
+                    self._name, self._options, self._requests = user_input[CONF_NAME].strip(), options, requests
+                    if requests and requests["google_round"]:
+                        return self._summary()
+                    return await self.async_step_save()
+        requests, count_errors = await count(self._app(), options)
         suggested = user_input or ({CONF_NAME: self._name, **self._options} if self._options else {})
         return self.async_show_form(
             step_id="user",
             data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, _suggested(suggested)),
-            errors=errors,
-            description_placeholders=placeholders(options),
+            errors=errors or {key: value for key, value in count_errors.items() if key == "base"},
+            description_placeholders=placeholders(requests),
         )
 
     def _summary(self) -> ConfigFlowResult:
         """What Google Flights will request, before saving: a form cannot count while it is filled in."""
+        assert self._requests is not None
         return self.async_show_menu(
-            step_id="summary_high" if count_requests(self._options).high else "summary",
+            step_id="summary_high" if self._requests["high"] else "summary",
             menu_options=["save", "change"],
-            description_placeholders=placeholders(self._options),
+            description_placeholders=placeholders(self._requests),
         )
 
     async def async_step_summary(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -292,42 +333,74 @@ class FlightPricesConfigFlow(ConfigFlow, domain=DOMAIN):
         return self._summary()
 
     async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self.async_create_entry(title=self._name, data={}, options=self._options)
+        return self.async_create_entry(title=self._name, data={CONF_URL: self._url}, options=self._options)
 
     async def async_step_change(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self.async_step_user()
 
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Another address for the app; every search that used the old one moves with it."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            url = user_input[CONF_URL].strip().rstrip("/")
+            if not (errors := await check_app(self.hass, url)):
+                old = entry.data.get(CONF_URL)
+                for other in self.hass.config_entries.async_entries(DOMAIN):
+                    if other.entry_id != entry.entry_id and other.data.get(CONF_URL) == old:
+                        self.hass.config_entries.async_update_entry(other, data={**other.data, CONF_URL: url})
+                        self.hass.config_entries.async_schedule_reload(other.entry_id)
+                return self.async_update_reload_and_abort(entry, data_updates={CONF_URL: url})
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(APP_SCHEMA, user_input or dict(entry.data)),
+            errors=errors,
+            description_placeholders={"app_url": APP_URL},
+        )
+
 
 class FlightPricesOptionsFlow(OptionsFlowWithReload):
-    """Change the search; the entry reloads and searches again what changed."""
+    """Change the search; the entry reloads and the app searches again what changed."""
 
     def __init__(self) -> None:
         super().__init__()
         self._options: dict[str, Any] = {}
+        self._requests: dict[str, Any] | None = None
+
+    def _app(self) -> FlightPricesApp:
+        return FlightPricesApp(async_get_clientsession(self.hass), self.config_entry.data[CONF_URL])
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if CONF_URL not in self.config_entry.data:
+            return self.async_abort(reason="app_missing", description_placeholders={"app_url": APP_URL})
         errors: dict[str, str] = {}
         if user_input is not None:
             options, errors = validate(user_input)
             if not errors:
-                self._options = options
-                if count_requests(options).google_round:
-                    return self._summary()
-                return await self.async_step_save()
+                requests, errors = await count(self._app(), options)
+                if not errors:
+                    self._options, self._requests = options, requests
+                    if requests and requests["google_round"]:
+                        return self._summary()
+                    return await self.async_step_save()
         current = user_input or self._options or self.config_entry.options
+        # Opening Configure shows what the saved search makes; after an error, what was sent.
+        requests, count_errors = await count(
+            self._app(), validate(user_input)[0] if user_input else self.config_entry.options
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(OPTIONS_SCHEMA, _suggested(current)),
-            errors=errors,
-            # Opening Configure shows what the saved search makes; after an error, what was sent.
-            description_placeholders=placeholders(validate(user_input)[0] if user_input else self.config_entry.options),
+            errors=errors or {key: value for key, value in count_errors.items() if key == "base"},
+            description_placeholders=placeholders(requests),
         )
 
     def _summary(self) -> ConfigFlowResult:
+        assert self._requests is not None
         return self.async_show_menu(
-            step_id="summary_high" if count_requests(self._options).high else "summary",
+            step_id="summary_high" if self._requests["high"] else "summary",
             menu_options=["save", "change"],
-            description_placeholders=placeholders(self._options),
+            description_placeholders=placeholders(self._requests),
         )
 
     async def async_step_summary(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

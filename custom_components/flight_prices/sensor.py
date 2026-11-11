@@ -14,21 +14,22 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, SOURCE_GOOGLE, TRIPS_IN_ATTRIBUTES
-from .coordinator import FlightPricesConfigEntry, FlightPricesCoordinator
-from .models import SearchParams, Trip, WeekResult
+from .coordinator import FlightPricesConfigEntry, FlightPricesCoordinator, parse_time
 
 # Every entity reads the coordinator's data, nothing is fetched per entity.
 PARALLEL_UPDATES = 0
+
+type Week = dict[str, Any]
+type Trip = dict[str, Any]
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: FlightPricesConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
-    params = coordinator.params
     entities: list[FlightPricesSensor] = [CheapestSensor(coordinator)]
-    entities += [WeekSensor(coordinator, number) for number in range(1, params.weeks + 1)]
-    entities += [DestinationSensor(coordinator, code) for code in params.all_destinations]
+    entities += [WeekSensor(coordinator, number) for number in range(1, coordinator.weeks + 1)]
+    entities += [DestinationSensor(coordinator, code) for code in coordinator.destinations]
     entities += [SearchSensor(coordinator, source) for source in coordinator.active_sources]
     # Weeks, destinations or sources taken out of the search leave no stale entities behind.
     registry = er.async_get(hass)
@@ -54,6 +55,10 @@ class FlightPricesSensor(CoordinatorEntity[FlightPricesCoordinator], SensorEntit
             entry_type=DeviceEntryType.SERVICE,
         )
 
+    @property
+    def _weeks(self) -> list[Week]:
+        return self.coordinator.data["weeks"]
+
 
 class PriceSensor(FlightPricesSensor):
     """A price for one adult, return."""
@@ -66,17 +71,8 @@ class PriceSensor(FlightPricesSensor):
         self._attr_native_unit_of_measurement = coordinator.hass.config.currency
 
 
-def _week_dates(result: WeekResult) -> dict[str, Any]:
-    return {"outbound_date": result.week.outbound.isoformat(), "return_date": result.week.inbound.isoformat()}
-
-
-def _search(params: SearchParams) -> dict[str, Any]:
-    """What was searched, for dashboards: hours run from..to, 24 being midnight."""
-    return {
-        "origins": list(params.origins),
-        "outbound_hours": [params.outbound_hours.start, params.outbound_hours.end],
-        "return_hours": [params.return_hours.start, params.return_hours.end],
-    }
+def _week_dates(week: Week) -> dict[str, Any]:
+    return {"outbound_date": week["outbound_date"], "return_date": week["return_date"]}
 
 
 class WeekSensor(PriceSensor):
@@ -91,24 +87,24 @@ class WeekSensor(PriceSensor):
         self._attr_translation_placeholders = {"number": str(number)}
 
     @property
-    def _result(self) -> WeekResult | None:
-        weeks = self.coordinator.data.weeks
+    def _week(self) -> Week | None:
+        weeks = self._weeks
         return weeks[self._index] if self._index < len(weeks) else None
 
     @property
     def native_value(self) -> float | None:
-        result = self._result
-        return result.trips[0].price if result and result.trips else None
+        week = self._week
+        return week["trips"][0]["price"] if week and week["trips"] else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if (result := self._result) is None:
+        if (week := self._week) is None:
             return None
         return {
-            **_week_dates(result),
-            **_search(self.coordinator.params),
-            "destinations_found": result.found,
-            "trips": [trip.as_attributes() for trip in result.trips[:TRIPS_IN_ATTRIBUTES]],
+            **_week_dates(week),
+            **self.coordinator.search_attributes,
+            "destinations_found": week["destinations_found"],
+            "trips": week["trips"][:TRIPS_IN_ATTRIBUTES],
         }
 
 
@@ -122,20 +118,20 @@ class CheapestSensor(PriceSensor):
         super().__init__(coordinator, "cheapest")
 
     @property
-    def _best(self) -> tuple[WeekResult, Trip] | None:
-        candidates = [(result, result.trips[0]) for result in self.coordinator.data.weeks if result.trips]
-        return min(candidates, key=lambda pair: pair[1].price, default=None)
+    def _best(self) -> tuple[Week, Trip] | None:
+        candidates = [(week, week["trips"][0]) for week in self._weeks if week["trips"]]
+        return min(candidates, key=lambda pair: pair[1]["price"], default=None)
 
     @property
     def native_value(self) -> float | None:
-        return best[1].price if (best := self._best) else None
+        return best[1]["price"] if (best := self._best) else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if (best := self._best) is None:
             return None
-        result, trip = best
-        return {**_week_dates(result), "city": trip.city or trip.destination, "trip": trip.as_attributes()}
+        week, trip = best
+        return {**_week_dates(week), "city": trip["city"] or trip["destination"], "trip": trip}
 
 
 class DestinationSensor(PriceSensor):
@@ -149,31 +145,26 @@ class DestinationSensor(PriceSensor):
         self._code = code
         self._attr_translation_placeholders = {"destination": code}
 
-    def _trips(self) -> list[tuple[WeekResult, Trip]]:
-        return [
-            (result, trip)
-            for result in self.coordinator.data.weeks
-            for trip in result.trips
-            if trip.destination == self._code
-        ]
+    def _trips(self) -> list[tuple[Week, Trip]]:
+        return [(week, trip) for week in self._weeks for trip in week["trips"] if trip["destination"] == self._code]
 
     @property
     def native_value(self) -> float | None:
-        prices = [trip.price for _, trip in self._trips()]
+        prices = [trip["price"] for _, trip in self._trips()]
         return min(prices) if prices else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         trips = self._trips()
-        best = min(trips, key=lambda pair: pair[1].price, default=None)
+        best = min(trips, key=lambda pair: pair[1]["price"], default=None)
         return {
-            "city": best[1].city if best else None,
-            "outbound_date": best[0].week.outbound.isoformat() if best else None,
+            "city": best[1]["city"] if best else None,
+            "outbound_date": best[0]["outbound_date"] if best else None,
             "weeks": [
-                {**_week_dates(result), "price": trip.price, "airline": trip.airline, "source": trip.source}
-                for result, trip in trips
+                {**_week_dates(week), "price": trip["price"], "airline": trip["airline"], "source": trip["source"]}
+                for week, trip in trips
             ],
-            "trip": best[1].as_attributes() if best else None,
+            "trip": best[1] if best else None,
         }
 
 
@@ -189,19 +180,22 @@ class SearchSensor(FlightPricesSensor):
         self._attr_translation_key = f"{source}_search"
 
     @property
+    def _state(self) -> dict[str, Any] | None:
+        return self.coordinator.data["sources"].get(self._source)
+
+    @property
     def native_value(self) -> datetime | None:
-        state = self.coordinator.data.sources.get(self._source)
-        return state.last_success if state else None
+        return parse_time(state["last_success"]) if (state := self._state) else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if (state := self.coordinator.data.sources.get(self._source)) is None:
+        if (state := self._state) is None:
             return None
         attributes: dict[str, Any] = {
-            "last_attempt": state.last_attempt.isoformat() if state.last_attempt else None,
-            "error": state.error,
-            "trips": len(state.trips),
+            "last_attempt": state["last_attempt"],
+            "error": state["error"],
+            "trips": state["trips"],
         }
         if self._source == SOURCE_GOOGLE:
-            attributes["running"] = self.coordinator.google_running
+            attributes["running"] = state["running"]
         return attributes

@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   tests:
+    # The integration, with the app faked; ruff for the whole repository.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -20,6 +21,46 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest --timeout 60
+
+  engine:
+    # The app's search engine, without Home Assistant: the tests install only what the image does.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements_test.txt
+      - run: pytest --timeout 60
+
+  image:
+    # The app's image builds; it is published only by the release workflow.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: true
+          tags: flight-prices-app:test
+      - name: The engine starts and answers
+        run: |
+          docker run -d --name app -p 8765:8765 flight-prices-app:test
+          for i in $(seq 1 30); do curl -sf localhost:8765/api/info && exit 0; sleep 1; done
+          docker logs app
+          exit 1
+      - uses: docker/setup-qemu-action@v3
+      - name: The image builds for aarch64 too
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          platforms: linux/arm64
+          push: false
 
   card:
     # The dashboard card: Node's own test runner, no packages to install.

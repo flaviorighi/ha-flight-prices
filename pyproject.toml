@@ -2,7 +2,7 @@
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "app"]
 
 [tool.ruff]
 line-length = 120
@@ -13,5 +13,5 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
-known-first-party = ["custom_components", "homeassistant"]
+known-first-party = ["custom_components", "flight_prices_engine", "homeassistant"]
 combine-as-imports = true
