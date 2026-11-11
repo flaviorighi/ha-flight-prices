@@ -351,3 +351,23 @@ async def test_unreadable_saved_results_start_empty(
     await search.load(restore={"sources": {"ryanair": {"trips": [{"source": "ryanair"}]}}, "names": []})
     await search.tick()
     assert _week(search, 1)["trips"][0]["price"] == 131.98
+
+
+async def test_restored_results_survive_a_restart_before_any_search(
+    make_search, ryanair: Ryanair, clock: Clock, tmp_path: Any, session: aiohttp.ClientSession
+) -> None:
+    """The results of version 0, sent once, are saved even when nothing is due before the app restarts."""
+    ryanair.answer(ryanair_payload())
+    await make_search()
+    saved = json.loads((tmp_path / "searches" / "entry1" / "state.json").read_text(encoding="utf-8"))
+    store = Store(tmp_path / "moved")
+
+    clock.tick(timedelta(hours=1))
+    moved = Search("entry1", config(), store, session, clock)
+    await moved.load(restore=saved)
+    # The app restarts before any source is due: the client no longer sends what it had.
+    again = Search("entry1", config(), store, session, clock)
+    await again.load()
+    await again.tick()
+    assert ryanair.call_count == 4
+    assert _week(again, 1)["trips"][0]["price"] == 131.98

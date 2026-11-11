@@ -146,7 +146,8 @@ class Search:
 
         restore is what the integration had saved before the app existed, used when the app has nothing.
         """
-        stored = await self._store.load_state(self.id) or restore or {}
+        saved_here = await self._store.load_state(self.id)
+        stored = saved_here or restore or {}
         try:
             names = dict(stored.get("names", {}))
             states = {
@@ -163,6 +164,10 @@ class Search:
             fingerprint = self.params.fingerprint(source)
             state = states.get(source)
             self.states[source] = state if state and state.fingerprint == fingerprint else SourceState(fingerprint)
+        if not saved_here and restore:
+            # Written at once: the client sends what it had only the first time, and a source may not be due
+            # before the app restarts.
+            await self._save()
 
     def start(self) -> None:
         """Search now and then whenever a source is due, until closed."""
