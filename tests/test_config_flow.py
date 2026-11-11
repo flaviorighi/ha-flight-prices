@@ -115,6 +115,8 @@ async def test_reconfigure_moves_every_search(hass: HomeAssistant, app: FakeApp)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert (first.data, second.data, other.data) == ({"url": APP}, {"url": APP}, {"url": "http://elsewhere.test:8765"})
+    # The searches moved are set up again: the test ends after that, not in the middle.
+    await hass.async_block_till_done()
 
 
 async def test_options_with_the_app_stopped(hass: HomeAssistant, app: FakeApp) -> None:
