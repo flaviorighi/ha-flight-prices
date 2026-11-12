@@ -6,7 +6,8 @@ destination, within the chosen departure hours. No key is needed. Fares are for 
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 import logging
 from typing import Any
@@ -15,13 +16,31 @@ from urllib.parse import urlencode
 import aiohttp
 
 from ..const import SOURCE_RYANAIR
-from ..models import Hours, Leg, Trip
+from ..models import Hours, Leg, SearchParams, Trip, Week
 from . import SourceBlocked, SourceError, site_locale
 
 _LOGGER = logging.getLogger(__name__)
 
 URL = "https://services-api.ryanair.com/farfnd/v4/roundTripFares"
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+
+@dataclass(frozen=True)
+class RyanairRequest:
+    """One request: the cheapest return fare to every destination, from one airport, for one week."""
+
+    week: Week
+    origin: str
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """What the request replaces among the trips of the previous round."""
+        return (self.week.outbound.isoformat(), self.origin)
+
+
+def plan(params: SearchParams, weeks: Iterable[Week]) -> list[RyanairRequest]:
+    """The requests of a round, in the order they are made: the coordinator and the options count the same list."""
+    return [RyanairRequest(week, origin) for week in weeks for origin in params.origins_for(SOURCE_RYANAIR)]
 
 
 class RyanairSource:

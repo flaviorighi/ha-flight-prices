@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta
+from itertools import groupby
 import logging
 import random
 from typing import Any
@@ -31,8 +32,8 @@ from .const import (
 )
 from .models import FlightData, SearchParams, SourceState, Trip, Week, WeekResult, cheapest_per_route
 from .sources import SourceBlocked, SourceError
-from .sources.google import GoogleSource, city_from_airport
-from .sources.ryanair import RyanairSource
+from .sources.google import GoogleSource, city_from_airport, plan as google_plan
+from .sources.ryanair import RyanairSource, plan as ryanair_plan
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,26 +130,25 @@ class FlightPricesCoordinator(DataUpdateCoordinator[FlightData]):
         searched: set[tuple[str, str]] = set()
         error: str | None = None
         try:
-            for week in weeks:
-                for origin in self.params.origins_for(SOURCE_RYANAIR):
-                    if searched or error:
-                        await asyncio.sleep(RYANAIR_DELAY)
-                    try:
-                        trips = await self.ryanair.search(
-                            origin,
-                            week.outbound,
-                            week.inbound,
-                            self.params.outbound_hours,
-                            self.params.return_hours,
-                            self.params.destinations,
-                        )
-                    except SourceBlocked:
-                        raise
-                    except SourceError as err:
-                        error = str(err)
-                        continue
-                    searched.add((week.outbound.isoformat(), origin))
-                    found.extend(trips)
+            for request in ryanair_plan(self.params, weeks):
+                if searched or error:
+                    await asyncio.sleep(RYANAIR_DELAY)
+                try:
+                    trips = await self.ryanair.search(
+                        request.origin,
+                        request.week.outbound,
+                        request.week.inbound,
+                        self.params.outbound_hours,
+                        self.params.return_hours,
+                        self.params.destinations,
+                    )
+                except SourceBlocked:
+                    raise
+                except SourceError as err:
+                    error = str(err)
+                    continue
+                searched.add(request.key)
+                found.extend(trips)
         except SourceBlocked as err:
             error = str(err)
         if searched:
@@ -181,36 +181,35 @@ class FlightPricesCoordinator(DataUpdateCoordinator[FlightData]):
             return await self.hass.async_add_executor_job(google.search, *args)
 
         try:
-            for week in weeks:
-                for destination in params.destinations_for(SOURCE_GOOGLE):
-                    for origin in params.origins_for(SOURCE_GOOGLE):
-                        try:
-                            out = await search(
-                                week.outbound, origin, destination, params.outbound_hours, params.direct_only
-                            )
-                            back = (
-                                await search(week.inbound, destination, origin, params.return_hours, params.direct_only)
-                                if out
-                                else []
-                            )
-                        except SourceBlocked:
-                            raise
-                        except SourceError as err:
-                            errors += 1
-                            error = str(err)
-                            if errors >= GOOGLE_MAX_ERRORS:
-                                raise SourceBlocked(f"{errors} errors in a row, the last: {err}") from err
-                            continue
-                        errors = 0
-                        # This search replaces what the previous round found for it.
-                        state.trips = [
-                            trip
-                            for trip in state.trips
-                            if (trip.outbound_date, trip.origin, trip.destination)
-                            != (week.outbound, origin, destination)
-                        ]
-                        if out and back:
-                            state.trips.append(self._google_trip(destination, out[0], back[0], week))
+            for week, week_requests in groupby(google_plan(params, weeks), key=lambda request: request.week):
+                for request in week_requests:
+                    origin, destination = request.origin, request.destination
+                    try:
+                        out = await search(
+                            week.outbound, origin, destination, params.outbound_hours, params.direct_only
+                        )
+                        back = (
+                            await search(week.inbound, destination, origin, params.return_hours, params.direct_only)
+                            if out
+                            else []
+                        )
+                    except SourceBlocked:
+                        raise
+                    except SourceError as err:
+                        errors += 1
+                        error = str(err)
+                        if errors >= GOOGLE_MAX_ERRORS:
+                            raise SourceBlocked(f"{errors} errors in a row, the last: {err}") from err
+                        continue
+                    errors = 0
+                    # This search replaces what the previous round found for it.
+                    state.trips = [
+                        trip
+                        for trip in state.trips
+                        if (trip.outbound_date, trip.origin, trip.destination) != (week.outbound, origin, destination)
+                    ]
+                    if out and back:
+                        state.trips.append(self._google_trip(destination, out[0], back[0], week))
                 self._store.async_delay_save(self._to_store, 10)
                 self.async_set_updated_data(self._assemble(params.upcoming_weeks(dt_util.now().date())))
         except SourceBlocked as err:

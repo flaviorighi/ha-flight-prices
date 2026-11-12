@@ -23,6 +23,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DESTINATIONS,
@@ -63,6 +64,9 @@ from .const import (
     SOURCES,
 )
 from .coordinator import FlightPricesConfigEntry
+from .models import SearchParams
+from .sources.google import plan as google_plan
+from .sources.ryanair import plan as ryanair_plan
 
 AIRPORT_RE = re.compile(r"^[A-Z]{3}$")
 COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
@@ -146,16 +150,13 @@ class Requests:
 def count_requests(options: Mapping[str, Any]) -> Requests:
     """Per round: Google weeks x destinations x airports x 2 (out and back), Ryanair airports x weeks."""
     sources = options.get(CONF_SOURCES, ())
-    weeks = int(options.get(CONF_WEEKS, DEFAULT_WEEKS))
-    google_round = 0
-    if SOURCE_GOOGLE in sources:
-        destinations = options.get(CONF_GOOGLE_DESTINATIONS) or options.get(CONF_DESTINATIONS) or ()
-        origins = options.get(CONF_GOOGLE_ORIGINS) or options.get(CONF_ORIGINS) or ()
-        google_round = weeks * len(destinations) * len(origins) * 2
+    params = SearchParams.from_options({CONF_ORIGINS: (), CONF_SOURCES: (), **options})
+    weeks = params.upcoming_weeks(dt_util.now().date())
+    google_requests = google_plan(params, weeks) if SOURCE_GOOGLE in sources else []
     return Requests(
-        google_round=google_round,
+        google_round=sum(request.max_requests for request in google_requests),
         google_hours=max(int(options.get(CONF_GOOGLE_INTERVAL, DEFAULT_GOOGLE_HOURS)), GOOGLE_MIN_HOURS),
-        ryanair_round=weeks * len(options.get(CONF_ORIGINS, ())) if SOURCE_RYANAIR in sources else 0,
+        ryanair_round=len(ryanair_plan(params, weeks)) if SOURCE_RYANAIR in sources else 0,
         ryanair_hours=int(options.get(CONF_RYANAIR_INTERVAL, DEFAULT_RYANAIR_HOURS)),
     )
 

@@ -10,17 +10,19 @@ Everything here blocks: run it in the executor.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time
 import json
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from fast_flights import FlightQuery, Passengers, create_query
 from primp import Client
 from selectolax.lexbor import LexborHTMLParser
 
-from ..models import Hours, Leg
+from ..const import SOURCE_GOOGLE
+from ..models import Hours, Leg, SearchParams, Week
 from . import SourceBlocked, SourceError
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +53,27 @@ class GoogleFlight:
     destination_name: str | None = None
     # The place searched for (an airport, or a city such as LON), the same for every flight of a page.
     place: Place | None = None
+
+
+@dataclass(frozen=True)
+class GoogleRequest:
+    """The search of one trip: the outbound flights, then the return ones if the outbound found any."""
+
+    week: Week
+    origin: str
+    destination: str
+    # The most requests it makes: one way out, one way back.
+    max_requests: ClassVar[int] = 2
+
+
+def plan(params: SearchParams, weeks: Iterable[Week]) -> list[GoogleRequest]:
+    """The requests of a round, in the order they are made: the coordinator and the options count the same list."""
+    return [
+        GoogleRequest(week, origin, destination)
+        for week in weeks
+        for destination in params.destinations_for(SOURCE_GOOGLE)
+        for origin in params.origins_for(SOURCE_GOOGLE)
+    ]
 
 
 class GoogleSource:
